@@ -1,4 +1,5 @@
 import type { IDEAPI } from './ide';
+import type { SecureAPI } from "./secure";
 import type {
   CatalogCourseSummary,
   CatalogCourseDetail,
@@ -16,7 +17,8 @@ export type CatalogResult =
 export type EnrollmentResult = { lifecycle: 'ACTIVE' | 'PAYMENT_REQUIRED' };
 export interface DesktopAPI {
   ide?: IDEAPI;
-  labs: import('./labs').LabsAPI;
+  labs: import("./labs").LabsAPI;
+  secure: SecureAPI;
   readonly platform?: string;
   webOrigin(): Promise<string>;
   integrityRequest(
@@ -24,7 +26,7 @@ export interface DesktopAPI {
     method: string,
     body?: unknown,
   ): Promise<Result<unknown>>;
-  learning: ReturnType<typeof import('../api/learning').createLearningClient>;
+  learning: ReturnType<typeof import("../api/learning").createLearningClient>;
   startLearning(slug: string): Promise<Result<{ href: string | null }>>;
   enroll(courseId: string): Promise<Result<EnrollmentResult>>;
   listCourses(): Promise<CatalogResult>;

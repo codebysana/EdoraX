@@ -94,7 +94,11 @@ export default async function ChapterReaderPage({
         courseSlug={course.slug}
         courseTitle={course.title}
         projectGoal={course.projectGoal}
-        variant={variant ? { productName: variant.productName, label: variant.label } : null}
+        variant={
+          variant
+            ? { productName: variant.productName, label: variant.label }
+            : null
+        }
         lessonLabel={chapter.lessonLabel}
         chapterTitle={chapter.title}
         chapterSlug={chapter.slug}
@@ -132,6 +136,7 @@ export default async function ChapterReaderPage({
             nextLocked={content.nextLocked}
             canMarkComplete={content.canMarkComplete}
             chapterComplete={content.chapterComplete}
+            integrityMode={course.integrityMode}
           />
         ) : (
           <ChapterMdx source={source} courseLabMode />

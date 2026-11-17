@@ -146,3 +146,5 @@ vite.config.ts.timestamp-*
 out/
 test-results/
 playwright-report/
+
+mediapipe/

@@ -1,39 +1,85 @@
 import type { ImportPlan } from "./course-import.js";
-import type { CourseUpdateModuleDiff, CourseUpdateChapterDiff } from "../../shared/api/teach.js";
+import type {
+  CourseUpdateModuleDiff,
+  CourseUpdateChapterDiff,
+} from "../../shared/api/teach.js";
 import { normalizeQuizConfig } from "../../shared/blocks/quiz/schema.js";
 
 export type IncomingLesson = ImportPlan["modules"][number]["lessons"][number];
 export type ExistingChapter = {
-  id: string; moduleId: string | null; contentKey?: string | null; title: string; slug: string; order: number;
-  source: string; summary: string | null; estimatedMinutes: number | null;
-  compiled?: string | null; publishedAt?: Date | string | null;
-  readerMode: string; isMilestone: boolean; archivedAt: Date | string | null;
-  blocks: { id: string; type: string; config: unknown; required: boolean; archivedAt: Date | string | null }[];
+  id: string;
+  moduleId: string | null;
+  contentKey?: string | null;
+  title: string;
+  slug: string;
+  order: number;
+  source: string;
+  summary: string | null;
+  estimatedMinutes: number | null;
+  compiled?: string | null;
+  publishedAt?: Date | string | null;
+  readerMode: string;
+  isMilestone: boolean;
+  archivedAt: Date | string | null;
+  blocks: {
+    id: string;
+    type: string;
+    config: unknown;
+    required: boolean;
+    archivedAt: Date | string | null;
+  }[];
 };
-export type ExistingModule = { id: string; contentKey?: string | null; title: string; order: number; archivedAt: Date | string | null };
-export type UpdateMapping = { moduleId: string | null; chapters: { chapterId: string | null; similarity: number | null; reason: string }[] }[];
+export type ExistingModule = {
+  id: string;
+  contentKey?: string | null;
+  title: string;
+  order: number;
+  archivedAt: Date | string | null;
+};
+export type UpdateMapping = {
+  moduleId: string | null;
+  chapters: {
+    chapterId: string | null;
+    similarity: number | null;
+    reason: string;
+  }[];
+}[];
 
 export function canonical(value: unknown): string {
-  return JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
-    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
+  return JSON.stringify(value, (_key, item) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.entries(item).sort(([a], [b]) => a.localeCompare(b)),
+        )
+      : item,
+  );
 }
 
-export const activityConfig = (block: { type: string; config: unknown }) => block.type === "QUIZ" ? normalizeQuizConfig(block.config) : block.config;
+export const activityConfig = (block: { type: string; config: unknown }) =>
+  block.type === "QUIZ" ? normalizeQuizConfig(block.config) : block.config;
 
 function normalizedText(value: string) {
-  return value.replace(/\bid\s*=\s*["'][^"']+["']/g, 'id="activity"')
+  return value
+    .replace(/\bid\s*=\s*["'][^"']+["']/g, 'id="activity"')
     .replace(/\b[0-9A-HJKMNP-TV-Z]{26}\b/g, "activity")
-    .toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 function shingles(value: string) {
   const words = normalizedText(value).split(/\s+/).filter(Boolean);
-  return new Set(words.length < 2 ? words : words.slice(1).map((word, i) => `${words[i]} ${word}`));
+  return new Set(
+    words.length < 2
+      ? words
+      : words.slice(1).map((word, i) => `${words[i]} ${word}`),
+  );
 }
 
 /** Sørensen–Dice bigram similarity. Ignores generated activity IDs, never module position. */
 export function textSimilarity(a: string, b: string): number {
-  const left = shingles(a), right = shingles(b);
+  const left = shingles(a),
+    right = shingles(b);
   return dice(left, right);
 }
 
@@ -41,116 +87,275 @@ function dice(left: Set<string>, right: Set<string>) {
   if (!left.size || !right.size) return 0;
   let common = 0;
   for (const token of left) if (right.has(token)) common++;
-  return 2 * common / (left.size + right.size);
+  return (2 * common) / (left.size + right.size);
 }
 
-function contentText(lesson: Pick<IncomingLesson, "source" | "blocks"> | ExistingChapter) {
-  const blocks = lesson.blocks.filter(block => !("archivedAt" in block) || !block.archivedAt);
-  return `${lesson.source}\n${blocks.map(block => `${block.type} ${canonical(activityConfig(block))}`).join("\n")}`;
+function contentText(
+  lesson: Pick<IncomingLesson, "source" | "blocks"> | ExistingChapter,
+) {
+  const blocks = lesson.blocks.filter(
+    (block) => !("archivedAt" in block) || !block.archivedAt,
+  );
+  return `${lesson.source}\n${blocks.map((block) => `${block.type} ${canonical(activityConfig(block))}`).join("\n")}`;
 }
 
-function comparableSource(lesson: Pick<IncomingLesson, "source" | "blocks"> | ExistingChapter) {
+function comparableSource(
+  lesson: Pick<IncomingLesson, "source" | "blocks"> | ExistingChapter,
+) {
   let source = lesson.source;
-  for (const block of lesson.blocks) source = source.replaceAll(block.id, "activity");
+  for (const block of lesson.blocks)
+    source = source.replaceAll(block.id, "activity");
   return source.replace(/\r\n/g, "\n").trim();
 }
 
-export function chapterSimilarity(incoming: IncomingLesson, old: ExistingChapter): number {
+export function chapterSimilarity(
+  incoming: IncomingLesson,
+  old: ExistingChapter,
+): number {
   return preparedSimilarity(prepare(incoming), prepare(old));
 }
 
 function prepare(lesson: IncomingLesson | ExistingChapter) {
-  return { readerMode: lesson.readerMode, content: shingles(contentText(lesson)), title: shingles(lesson.title) };
+  return {
+    readerMode: lesson.readerMode,
+    content: shingles(contentText(lesson)),
+    title: shingles(lesson.title),
+  };
 }
 
-function preparedSimilarity(incoming: ReturnType<typeof prepare>, old: ReturnType<typeof prepare>) {
+function preparedSimilarity(
+  incoming: ReturnType<typeof prepare>,
+  old: ReturnType<typeof prepare>,
+) {
   if (incoming.readerMode !== old.readerMode) return 0;
   const content = dice(incoming.content, old.content);
   const title = dice(incoming.title, old.title);
   // A title or old file path alone cannot establish identity after a rewrite.
-  return content < 0.72 ? 0 : Math.round((content * 0.9 + title * 0.1) * 1000) / 1000;
+  return content < 0.72
+    ? 0
+    : Math.round((content * 0.9 + title * 0.1) * 1000) / 1000;
 }
 
 /** Course-wide, one-to-one matching; ties on either side are deliberately left unmatched. */
-export function matchCourseUpdate(plan: ImportPlan, modules: ExistingModule[], chapters: ExistingChapter[]) {
-  const incoming = plan.modules.flatMap((module, mi) => module.lessons.map((lesson, li) => ({ lesson, mi, li })));
+export function matchCourseUpdate(
+  plan: ImportPlan,
+  modules: ExistingModule[],
+  chapters: ExistingChapter[],
+) {
+  const incoming = plan.modules.flatMap((module, mi) =>
+    module.lessons.map((lesson, li) => ({ lesson, mi, li })),
+  );
   // Build the similarity index once instead of retokenizing long chapters for each comparison.
   const existingIndex = chapters.map(prepare);
   const scores = incoming.map(({ lesson }) => {
     const prepared = prepare(lesson);
     return existingIndex.map((old, index) => {
-      if (chapters[index].contentKey && chapters[index].contentKey !== lesson.key) return 0;
+      if (
+        chapters[index].contentKey &&
+        chapters[index].contentKey !== lesson.key
+      )
+        return 0;
       return preparedSimilarity(prepared, old);
     });
   });
-  const mapping: UpdateMapping = plan.modules.map(module => ({ moduleId: null, chapters: module.lessons.map(() => ({ chapterId: null, similarity: null, reason: "New or ambiguous content; previous learner history is retained separately." })) }));
+  const mapping: UpdateMapping = plan.modules.map((module) => ({
+    moduleId: null,
+    chapters: module.lessons.map(() => ({
+      chapterId: null,
+      similarity: null,
+      reason:
+        "New or ambiguous content. Previous learner history is retained separately.",
+    })),
+  }));
   for (const [i, item] of incoming.entries()) {
-    const exactIndex = item.lesson.key ? chapters.findIndex(chapter => chapter.contentKey === item.lesson.key) : -1;
+    const exactIndex = item.lesson.key
+      ? chapters.findIndex((chapter) => chapter.contentKey === item.lesson.key)
+      : -1;
     if (exactIndex >= 0) {
-      mapping[item.mi].chapters[item.li] = { chapterId: chapters[exactIndex].id,
-        similarity: scores[i][exactIndex] ?? 0, reason: "Stable lesson key matches, even if its content or location changed." };
+      mapping[item.mi].chapters[item.li] = {
+        chapterId: chapters[exactIndex].id,
+        similarity: scores[i][exactIndex] ?? 0,
+        reason:
+          "Stable lesson key matches, even if its content or location changed.",
+      };
       continue;
     }
-    const ranked = scores[i].map((score, index) => ({ score, index })).sort((a, b) => b.score - a.score);
+    const ranked = scores[i]
+      .map((score, index) => ({ score, index }))
+      .sort((a, b) => b.score - a.score);
     const best = ranked[0];
     mapping[item.mi].chapters[item.li].similarity = best?.score ?? 0;
-    if (!best || best.score < 0.8 || best.score - (ranked[1]?.score ?? 0) < 0.08) continue;
-    const competitors = scores.map((row, index) => ({ score: row[best.index], index })).sort((a, b) => b.score - a.score);
-    if (competitors[0].index !== i || best.score - (competitors[1]?.score ?? 0) < 0.08) continue;
-    mapping[item.mi].chapters[item.li] = { chapterId: chapters[best.index].id, similarity: best.score,
-      reason: best.score >= 0.99 ? "Matching content across the course." : "Unique content similarity match across the course." };
+    if (
+      !best ||
+      best.score < 0.8 ||
+      best.score - (ranked[1]?.score ?? 0) < 0.08
+    )
+      continue;
+    const competitors = scores
+      .map((row, index) => ({ score: row[best.index], index }))
+      .sort((a, b) => b.score - a.score);
+    if (
+      competitors[0].index !== i ||
+      best.score - (competitors[1]?.score ?? 0) < 0.08
+    )
+      continue;
+    mapping[item.mi].chapters[item.li] = {
+      chapterId: chapters[best.index].id,
+      similarity: best.score,
+      reason:
+        best.score >= 0.99
+          ? "Matching content across the course."
+          : "Unique content similarity match across the course.",
+    };
   }
   // Match module names first, then chapter membership for renamed modules. Require mutual uniqueness.
-  const moduleScores = plan.modules.map((module, mi) => modules.map(old => {
-    if (old.contentKey && old.contentKey !== module.key) return 0;
-    const oldIds = new Set(chapters.filter(c => c.moduleId === old.id).map(c => c.id));
-    const matched = mapping[mi].chapters.filter(c => c.chapterId && oldIds.has(c.chapterId)).length;
-    const overlap = matched ? 2 * matched / (module.lessons.length + oldIds.size) : 0;
-    // A whole chapter can move out of a named module; membership must not steal that module's identity.
-    return normalizedText(module.title) === normalizedText(old.title) ? 3 + overlap : overlap;
-  }));
+  const moduleScores = plan.modules.map((module, mi) =>
+    modules.map((old) => {
+      if (old.contentKey && old.contentKey !== module.key) return 0;
+      const oldIds = new Set(
+        chapters.filter((c) => c.moduleId === old.id).map((c) => c.id),
+      );
+      const matched = mapping[mi].chapters.filter(
+        (c) => c.chapterId && oldIds.has(c.chapterId),
+      ).length;
+      const overlap = matched
+        ? (2 * matched) / (module.lessons.length + oldIds.size)
+        : 0;
+      // A whole chapter can move out of a named module; membership must not steal that module's identity.
+      return normalizedText(module.title) === normalizedText(old.title)
+        ? 3 + overlap
+        : overlap;
+    }),
+  );
   for (let mi = 0; mi < plan.modules.length; mi++) {
-    const exactIndex = plan.modules[mi].key ? modules.findIndex(module => module.contentKey === plan.modules[mi].key) : -1;
+    const exactIndex = plan.modules[mi].key
+      ? modules.findIndex(
+          (module) => module.contentKey === plan.modules[mi].key,
+        )
+      : -1;
     if (exactIndex >= 0) {
       mapping[mi].moduleId = modules[exactIndex].id;
       continue;
     }
-    const ranked = moduleScores[mi].map((score, index) => ({ score, index })).sort((a, b) => b.score - a.score);
+    const ranked = moduleScores[mi]
+      .map((score, index) => ({ score, index }))
+      .sort((a, b) => b.score - a.score);
     const best = ranked[0];
-    if (!best || best.score < 0.5 || best.score - (ranked[1]?.score ?? 0) < 0.1) continue;
-    const competitors = moduleScores.map((row, index) => ({ score: row[best.index], index })).sort((a, b) => b.score - a.score);
-    if (competitors[0].index === mi && best.score - (competitors[1]?.score ?? 0) >= 0.1) mapping[mi].moduleId = modules[best.index].id;
+    if (!best || best.score < 0.5 || best.score - (ranked[1]?.score ?? 0) < 0.1)
+      continue;
+    const competitors = moduleScores
+      .map((row, index) => ({ score: row[best.index], index }))
+      .sort((a, b) => b.score - a.score);
+    if (
+      competitors[0].index === mi &&
+      best.score - (competitors[1]?.score ?? 0) >= 0.1
+    )
+      mapping[mi].moduleId = modules[best.index].id;
   }
-  const moduleById = new Map(modules.map(m => [m.id, m]));
-  const chapterById = new Map(chapters.map(c => [c.id, c]));
+  const moduleById = new Map(modules.map((m) => [m.id, m]));
+  const chapterById = new Map(chapters.map((c) => [c.id, c]));
   const diff: CourseUpdateModuleDiff[] = plan.modules.map((module, mi) => {
-    const match = mapping[mi], old = match.moduleId ? moduleById.get(match.moduleId) : undefined;
-    const chapterDiffs: CourseUpdateChapterDiff[] = module.lessons.map((lesson, li) => {
-      const matched = match.chapters[li], previous = matched.chapterId ? chapterById.get(matched.chapterId) : undefined;
-      const changes: string[] = [];
-      if (previous) {
-        if (previous.title !== lesson.title) changes.push("Title");
-        if (comparableSource(previous) !== comparableSource(lesson) ||
-            canonical(previous.blocks.filter(b => !b.archivedAt).map(b => [b.type, activityConfig(b), b.required])) !== canonical(lesson.blocks.map(b => [b.type, activityConfig(b), b.required]))) changes.push("Content or activities");
-        if (previous.order !== lesson.lessonNum) changes.push("Order");
-        if (previous.summary !== lesson.summary || previous.estimatedMinutes !== lesson.estimatedMinutes || previous.isMilestone !== lesson.isMilestone || previous.readerMode !== lesson.readerMode) changes.push("Lesson settings");
-        if (previous.compiled && comparableSource({ ...previous, source: previous.compiled }) !== comparableSource(lesson)) changes.push("Published content");
-        if (previous.publishedAt === null) changes.push("Unpublished chapter");
-      }
-      const moved = previous && previous.moduleId !== match.moduleId;
-      return { title: lesson.title, previousTitle: previous?.title, previousModule: previous?.moduleId ? moduleById.get(previous.moduleId)?.title : undefined,
-        action: !previous ? "added" : previous.archivedAt ? "restored" : moved ? "moved" : changes.length ? "changed" : "unchanged",
-        similarity: matched.similarity, reason: matched.reason, changes };
-    });
+    const match = mapping[mi],
+      old = match.moduleId ? moduleById.get(match.moduleId) : undefined;
+    const chapterDiffs: CourseUpdateChapterDiff[] = module.lessons.map(
+      (lesson, li) => {
+        const matched = match.chapters[li],
+          previous = matched.chapterId
+            ? chapterById.get(matched.chapterId)
+            : undefined;
+        const changes: string[] = [];
+        if (previous) {
+          if (previous.title !== lesson.title) changes.push("Title");
+          if (
+            comparableSource(previous) !== comparableSource(lesson) ||
+            canonical(
+              previous.blocks
+                .filter((b) => !b.archivedAt)
+                .map((b) => [b.type, activityConfig(b), b.required]),
+            ) !==
+              canonical(
+                lesson.blocks.map((b) => [
+                  b.type,
+                  activityConfig(b),
+                  b.required,
+                ]),
+              )
+          )
+            changes.push("Content or activities");
+          if (previous.order !== lesson.lessonNum) changes.push("Order");
+          if (
+            previous.summary !== lesson.summary ||
+            previous.estimatedMinutes !== lesson.estimatedMinutes ||
+            previous.isMilestone !== lesson.isMilestone ||
+            previous.readerMode !== lesson.readerMode
+          )
+            changes.push("Lesson settings");
+          if (
+            previous.compiled &&
+            comparableSource({ ...previous, source: previous.compiled }) !==
+              comparableSource(lesson)
+          )
+            changes.push("Published content");
+          if (previous.publishedAt === null)
+            changes.push("Unpublished chapter");
+        }
+        const moved = previous && previous.moduleId !== match.moduleId;
+        return {
+          title: lesson.title,
+          previousTitle: previous?.title,
+          previousModule: previous?.moduleId
+            ? moduleById.get(previous.moduleId)?.title
+            : undefined,
+          action: !previous
+            ? "added"
+            : previous.archivedAt
+              ? "restored"
+              : moved
+                ? "moved"
+                : changes.length
+                  ? "changed"
+                  : "unchanged",
+          similarity: matched.similarity,
+          reason: matched.reason,
+          changes,
+        };
+      },
+    );
     // Packages are patches: omission never means removal.
     const order = module.order ?? old?.order ?? mi + 1;
-    return { title: module.title, previousTitle: old?.title, previousOrder: old?.order, order,
-      action: !old ? "added" : old.archivedAt ? "restored" : old.title !== module.title || old.order !== order || chapterDiffs.some(c => c.action !== "unchanged") ? "changed" : "unchanged", chapters: chapterDiffs };
+    return {
+      title: module.title,
+      previousTitle: old?.title,
+      previousOrder: old?.order,
+      order,
+      action: !old
+        ? "added"
+        : old.archivedAt
+          ? "restored"
+          : old.title !== module.title ||
+              old.order !== order ||
+              chapterDiffs.some((c) => c.action !== "unchanged")
+            ? "changed"
+            : "unchanged",
+      chapters: chapterDiffs,
+    };
   });
   for (const key of plan.remove?.lessonKeys ?? []) {
-    const previous = chapters.find(chapter => chapter.contentKey === key);
-    diff.push({ title: previous?.title ?? key, action: "removed", chapters: [{ title: previous?.title ?? key,
-      action: "removed", similarity: null, reason: "Explicit removal from the new release; old releases retain it.", changes: [] }] });
+    const previous = chapters.find((chapter) => chapter.contentKey === key);
+    diff.push({
+      title: previous?.title ?? key,
+      action: "removed",
+      chapters: [
+        {
+          title: previous?.title ?? key,
+          action: "removed",
+          similarity: null,
+          reason:
+            "Explicit removal from the new release; old releases retain it.",
+          changes: [],
+        },
+      ],
+    });
   }
   for (const key of plan.remove?.moduleKeys ?? []) {
     const previous = modules.find(module => module.contentKey === key);

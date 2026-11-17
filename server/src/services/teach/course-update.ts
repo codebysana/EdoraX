@@ -16,7 +16,7 @@ type StoredPlan = { content: ImportPlan; mapping: UpdateMapping };
 
 async function snapshot(db: Prisma.TransactionClient, courseId: string) {
   const course = await db.course.findUniqueOrThrow({ where: { id: courseId }, include: {
-    modules: { orderBy: { id: "asc" } },
+      modules: { orderBy: { id: "asc" } },
     chapters: { orderBy: { id: "asc" }, include: { blocks: { orderBy: [{ order: "asc" }, { id: "asc" }] } } },
   } });
   if (!course.activeReleaseId) return { ...course, revision: null };
@@ -52,11 +52,11 @@ export async function previewCourseZipUpdate(user: SessionUser, courseId: string
     const affected = new Set<string>();
     const existing = effective?.variants[slug]?.flatMap(module => module.chapters) ?? [];
     for (const [mi, module] of plan.modules.entries()) for (const [li, lesson] of module.lessons.entries()) {
-      if (result.modules[mi]?.chapters[li]?.action === "unchanged") continue;
-      const priorId = result.mapping[mi]?.chapters[li]?.chapterId;
+        if (result.modules[mi]?.chapters[li]?.action === "unchanged") continue;
+        const priorId = result.mapping[mi]?.chapters[li]?.chapterId;
       const variantChapter = existing.find(chapter => lesson.key ? chapter.key === lesson.key : chapter.id === priorId);
       if (!priorId || !variantChapter || variantChapter.id === priorId) affected.add(lesson.key ?? lesson.title);
-    }
+      }
     for (const key of plan.remove?.lessonKeys ?? []) affected.add(key);
     const variantPlan = plan.variants?.find(variant => variant.slug === slug);
     for (const override of variantPlan?.overrides ?? []) affected.add(override.lessonKey);
@@ -68,39 +68,86 @@ export async function previewCourseZipUpdate(user: SessionUser, courseId: string
   });
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
   const warnings = [
-    "Only supplied keys change. Omitted content stays in the course; removals must be explicit.",
+    "Only supplied keys change. Omitted content stays in the course. Removals must be explicit.",
     "Shared edits reach inheriting variants. A variant override changes only that variant.",
     "Variant-only modules, omitted lessons, and module order change only their named variant.",
     "Learners who already started stay on their release. New learners receive the new release.",
-    "Changed chapters and activities get new progress identities; old submissions and history remain.",
+    "Changed chapters and activities get new progress identities. Old submissions and history remain.",
     "Course details, pricing, ownership, and publication status are unchanged.",
   ];
-  await prisma.courseImportPreview.deleteMany({ where: { expiresAt: { lt: new Date() }, appliedAt: null } });
-  await prisma.courseImportPreview.deleteMany({ where: { courseId, userId: user.id, appliedAt: null } });
-  const preview = await prisma.courseImportPreview.create({ data: {
-    courseId, userId: user.id, fingerprint: fingerprint(current), expiresAt,
-    plan: { content: plan, mapping: result.mapping } as unknown as Prisma.InputJsonValue,
-    diff: { modules: result.modules, variants, warnings } as unknown as Prisma.InputJsonValue,
-  } });
-  return { previewId: preview.id, expiresAt: expiresAt.toISOString(), modules: result.modules, variants, warnings };
+  await prisma.courseImportPreview.deleteMany({
+    where: { expiresAt: { lt: new Date() }, appliedAt: null },
+  });
+  await prisma.courseImportPreview.deleteMany({
+    where: { courseId, userId: user.id, appliedAt: null },
+  });
+  const preview = await prisma.courseImportPreview.create({
+    data: {
+      courseId,
+      userId: user.id,
+      fingerprint: fingerprint(current),
+      expiresAt,
+      plan: {
+        content: plan,
+        mapping: result.mapping,
+      } as unknown as Prisma.InputJsonValue,
+      diff: {
+        modules: result.modules,
+        variants,
+        warnings,
+      } as unknown as Prisma.InputJsonValue,
+    },
+  });
+  return {
+    previewId: preview.id,
+    expiresAt: expiresAt.toISOString(),
+    modules: result.modules,
+    variants,
+    warnings,
+  };
 }
 
-export async function approveCourseZipUpdate(user: SessionUser, courseId: string, previewId: string,
-  source: CourseZipSource = "dashboard") {
+export async function approveCourseZipUpdate(
+  user: SessionUser,
+  courseId: string,
+  previewId: string,
+  source: CourseZipSource = "dashboard",
+) {
   await requireCourseById(user, courseId);
   try {
-    return await prisma.$transaction(async tx => {
-      const preview = await tx.courseImportPreview.findFirst({ where: { id: previewId, courseId, userId: user.id } });
-      if (!preview || preview.appliedAt || preview.expiresAt <= new Date()) throw new ConflictError("This preview expired or was already applied. Upload the ZIP again.");
-      const current = await snapshot(tx, courseId);
-      if (fingerprint(current) !== preview.fingerprint) throw new ConflictError("Course content changed after this preview. Upload the ZIP again to review the latest changes.");
-      const { content, mapping } = preview.plan as unknown as StoredPlan;
-      await publishCourseRelease(tx, courseId, content, mapping);
-      await tx.courseImportPreview.update({ where: { id: preview.id }, data: { appliedAt: new Date() } });
-      return { courseSlug: current.slug };
-    }, { isolationLevel: "Serializable", timeout: source === "repository" ? 300000 : 60000, maxWait: 10000 });
+    return await prisma.$transaction(
+      async (tx) => {
+        const preview = await tx.courseImportPreview.findFirst({
+          where: { id: previewId, courseId, userId: user.id },
+        });
+        if (!preview || preview.appliedAt || preview.expiresAt <= new Date())
+          throw new ConflictError(
+            "This preview expired or was already applied. Upload the ZIP again.",
+          );
+        const current = await snapshot(tx, courseId);
+        if (fingerprint(current) !== preview.fingerprint)
+          throw new ConflictError(
+            "Course content changed after this preview. Upload the ZIP again to review the latest changes.",
+          );
+        const { content, mapping } = preview.plan as unknown as StoredPlan;
+        await publishCourseRelease(tx, courseId, content, mapping);
+        await tx.courseImportPreview.update({
+          where: { id: preview.id },
+          data: { appliedAt: new Date() },
+        });
+        return { courseSlug: current.slug };
+      },
+      {
+        isolationLevel: "Serializable",
+        timeout: source === "repository" ? 300000 : 60000,
+        maxWait: 10000,
+      },
+    );
   } catch (error) {
-    if ((error as { code?: string }).code === "P2034") throw new ConflictError("The course changed during approval. Upload the ZIP again.");
+    if ((error as { code?: string }).code === "P2034")
+      throw new ConflictError(
+        "The course changed during approval. Upload the ZIP again.",
+      );
     throw error;
   }
 }

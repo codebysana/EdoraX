@@ -7,7 +7,12 @@ import { ChapterMdx } from "@/mdx/compile";
 const TICKS = "```";
 
 // kind "mdx" is chapter text used as written; the others are wrapped in a fence of that kind.
-const EXAMPLES: { name: string; note: string; kind: "flow" | "sequence" | "mermaid" | "mdx"; spec: string }[] = [
+const EXAMPLES: {
+  name: string;
+  note: string;
+  kind: "flow" | "sequence" | "mermaid" | "mdx";
+  spec: string;
+}[] = [
   {
     name: "An existing MermaidDiagram tag, drawn automatically",
     note: "Most older chapters write Mermaid as a <MermaidDiagram> tag. The tag's title and legend are kept, and a plain line (---) is drawn without an arrowhead.",
@@ -70,7 +75,7 @@ Web server --> You: Here is the page`,
   },
   {
     name: "Groups",
-    note: "group ... end draws a labelled box around the parts inside it; groups can nest, and an arrow can point at a whole group by its [id]. Mermaid subgraphs become groups.",
+    note: "group ... end draws a labelled box around the parts inside it. Groups can nest, and an arrow can point at a whole group by its [id]. Mermaid subgraphs become groups.",
     kind: "flow",
     spec: `title: The building blocks of a small app
 box Phone
@@ -113,7 +118,7 @@ end`,
   },
   {
     name: "A decision",
-    note: "decision draws a diamond for a question. Arrows meet its points, and its answers label the arrows that leave it. A Mermaid {\"...\"} node becomes one too.",
+    note: 'decision draws a diamond for a question. Arrows meet its points, and its answers label the arrows that leave it. A Mermaid {"..."} node becomes one too.',
     kind: "flow",
     spec: `title: Before you build the next feature
 direction: down
@@ -179,15 +184,21 @@ export default function DiagramGalleryPage() {
     <main className="mx-auto w-full max-w-[1200px] px-4 py-6">
       <h1 className="mb-1 text-xl font-semibold">Diagram fences</h1>
       <p className="mb-6 max-w-[70ch] text-sm text-muted-foreground">
-        Each example is a {TICKS}flow or {TICKS}sequence fence in a chapter, shown with the text an author writes. See
+        Each example is a {TICKS}flow or {TICKS}sequence fence in a chapter,
+        shown with the text an author writes. See
         docs/diagram-components-plan.md for the grammar. Dev only.
       </p>
       <div className="space-y-10">
         {EXAMPLES.map((example) => (
-          <section key={example.name} className="grid gap-4 border-t border-border pt-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          <section
+            key={example.name}
+            className="grid gap-4 border-t border-border pt-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]"
+          >
             <div className="min-w-0">
               <h2 className="text-base font-semibold">{example.name}</h2>
-              <p className="mb-3 text-sm text-muted-foreground">{example.note}</p>
+              <p className="mb-3 text-sm text-muted-foreground">
+                {example.note}
+              </p>
               {/* No ligatures, so "->" shows as typed, not as an arrow glyph. */}
               <pre className="overflow-x-auto rounded-md border border-border bg-muted p-3 text-[13px] leading-relaxed [font-variant-ligatures:none]">
                 {source(example)}
@@ -204,5 +215,7 @@ export default function DiagramGalleryPage() {
 }
 
 function source(example: (typeof EXAMPLES)[number]): string {
-  return example.kind === "mdx" ? example.spec : `${TICKS}${example.kind}\n${example.spec}\n${TICKS}`;
+  return example.kind === "mdx"
+    ? example.spec
+    : `${TICKS}${example.kind}\n${example.spec}\n${TICKS}`;
 }

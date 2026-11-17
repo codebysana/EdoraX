@@ -131,6 +131,7 @@ export type CourseBuilderCourse = {
   pricingType: CoursePricingType;
   priceCents: number;
   currency: string;
+  integrityMode: "STANDARD" | "SECURE";
   enrollmentCount: number;
   modules: CourseBuilderModule[];
 };
@@ -144,7 +145,7 @@ export type CourseBuilderView = {
 export type CourseSettingsView = Pick<CourseBuilderCourse,
   "id" | "slug" | "title" | "description" | "projectGoal" | "difficulty" |
   "estimatedHours" | "category" | "sequential" | "coverUrl" | "status" | "pricingType" |
-  "priceCents" | "currency"
+  "priceCents" | "currency" | "integrityMode"
 > & {
   autoGradeOpenQuestions: boolean;
   enrollmentCount: number;

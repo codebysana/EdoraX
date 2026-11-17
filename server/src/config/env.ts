@@ -21,9 +21,13 @@ const optionalString = z
   .transform((value) => (value && value.trim() ? value.trim() : undefined));
 
 const schema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  LOG_LEVEL: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .default("info"),
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 
@@ -43,16 +47,31 @@ const schema = z.object({
     .string()
     .optional()
     .transform((value) => value !== "false"),
-  WEEKLY_GOAL_REMINDER_HOUR_UTC: z.coerce.number().int().min(0).max(23).default(9),
+  WEEKLY_GOAL_REMINDER_HOUR_UTC: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(23)
+    .default(9),
   /** Daily job that deletes quiz camera stills older than 30 days. */
-  INTEGRITY_RETENTION_HOUR_UTC: z.coerce.number().int().min(0).max(23).default(3),
+  INTEGRITY_RETENTION_HOUR_UTC: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(23)
+    .default(3),
 
   /** Background worker that sends queued notification email and pushes live notifications. */
   NOTIFICATION_WORKER_ENABLED: z
     .string()
     .optional()
     .transform((value) => value !== "false"),
-  NOTIFICATION_WORKER_INTERVAL_MS: z.coerce.number().int().min(1_000).max(300_000).default(5_000),
+  NOTIFICATION_WORKER_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(300_000)
+    .default(5_000),
   /** Most routine study reminders one user can get in 24 hours, across all their courses. 0 turns them off. */
   REMINDER_DAILY_LIMIT: z.coerce.number().int().min(0).max(5).default(1),
   /**
@@ -71,8 +90,11 @@ const schema = z.object({
    * Without it the AI interview feature reports that it is not set up.
    */
   AI_KEY_ENCRYPTION_KEY: optionalString.refine(
-    (value) => value === undefined || (/^[A-Za-z0-9+/]+={0,2}$/.test(value) && Buffer.from(value, "base64").length === 32),
-    "AI_KEY_ENCRYPTION_KEY must be 32 bytes encoded as base64 (for example: openssl rand -base64 32)"
+    (value) =>
+      value === undefined ||
+      (/^[A-Za-z0-9+/]+={0,2}$/.test(value) &&
+        Buffer.from(value, "base64").length === 32),
+    "AI_KEY_ENCRYPTION_KEY must be 32 bytes encoded as base64 (for example: openssl rand -base64 32)",
   ),
 
   /**
@@ -89,7 +111,12 @@ const schema = z.object({
   /** Questions one learner may ask per UTC day. */
   LEARNER_QA_DAILY_LIMIT: z.coerce.number().int().min(1).max(500).default(20),
   /** Questions the whole platform may answer per UTC day, the cap on the Anthropic bill. */
-  LEARNER_QA_GLOBAL_DAILY_LIMIT: z.coerce.number().int().min(1).max(100_000).default(500),
+  LEARNER_QA_GLOBAL_DAILY_LIMIT: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100_000)
+    .default(500),
 
   /** Private Cloudflare R2 bucket used for instructor-uploaded course images. */
   R2_ENDPOINT: optionalString,
@@ -101,6 +128,12 @@ const schema = z.object({
    * than one API replica runs; otherwise each process makes its own at boot.
    */
   INTEGRITY_MEDIA_SECRET: optionalString,
+
+  /**
+   * Our own sentence-transformers service (backend-src/similarity-service) used to compare written
+   * answers. Optional: without it the check falls back to word overlap.
+   */
+  SIMILARITY_SERVICE_URL: optionalString,
 
   /**
    * Gamification switches (docs/14-gamification.mdx), each on unless set to "false". Levels and

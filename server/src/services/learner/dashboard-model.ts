@@ -273,18 +273,18 @@ export function buildMenteeDashboardViewModel(args: {
 
   const running = args.sessions.find((session) => session.status === "RUNNING");
   const primaryCourse = [...courses]
-    .filter((course) => course.state !== "DROPPED")
-    .sort((a, b) => {
+      .filter((course) => course.state !== "DROPPED")
+      .sort((a, b) => {
       if (a.priority === 0 || b.priority === 0) return a.priority - b.priority;
-      if (running) {
+        if (running) {
         if (a.id === running.enrollmentId && b.id !== running.enrollmentId) return -1;
         if (b.id === running.enrollmentId && a.id !== running.enrollmentId) return 1;
-      }
-      if (a.priority !== b.priority) return a.priority - b.priority;
-      const aDate = a.lastActiveAt ? Date.parse(a.lastActiveAt) : 0;
-      const bDate = b.lastActiveAt ? Date.parse(b.lastActiveAt) : 0;
-      return bDate - aDate || a.title.localeCompare(b.title);
-    })[0] ?? null;
+        }
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        const aDate = a.lastActiveAt ? Date.parse(a.lastActiveAt) : 0;
+        const bDate = b.lastActiveAt ? Date.parse(b.lastActiveAt) : 0;
+        return bDate - aDate || a.title.localeCompare(b.title);
+      })[0] ?? null;
 
   const actions: DashboardAction[] = [];
   for (const response of latest) {

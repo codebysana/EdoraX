@@ -15,7 +15,9 @@ const TICKET_TTL_MS = 2 * 60 * 1000;
 
 const secret = env.REALTIME_TOKEN_SECRET ?? randomBytes(32).toString("hex");
 if (!env.REALTIME_TOKEN_SECRET && isProduction) {
-  logger.warn("[realtime] REALTIME_TOKEN_SECRET not set; tickets only verify on the API process that issued them");
+  logger.warn(
+    "[realtime] REALTIME_TOKEN_SECRET not set. Tickets only verify on the API process that issued them",
+  );
 }
 
 type TicketClaims = { sid: string; uid: string; exp: number };
@@ -30,15 +32,26 @@ export function signRealtimeTicket(claims: TicketClaims): string {
 }
 
 /** Claims of a well-signed, unexpired ticket, or null. Does not look at the database. */
-export function verifyRealtimeTicket(token: string, now = Date.now()): TicketClaims | null {
+export function verifyRealtimeTicket(
+  token: string,
+  now = Date.now(),
+): TicketClaims | null {
   const [payload, signature, extra] = token.split(".");
   if (!payload || !signature || extra !== undefined) return null;
   const expected = Buffer.from(sign(payload));
   const given = Buffer.from(signature);
-  if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+  if (expected.length !== given.length || !timingSafeEqual(expected, given))
+    return null;
   try {
-    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<TicketClaims>;
-    if (typeof claims.sid !== "string" || typeof claims.uid !== "string" || typeof claims.exp !== "number") return null;
+    const claims = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    ) as Partial<TicketClaims>;
+    if (
+      typeof claims.sid !== "string" ||
+      typeof claims.uid !== "string" ||
+      typeof claims.exp !== "number"
+    )
+      return null;
     if (claims.exp <= now) return null;
     return { sid: claims.sid, uid: claims.uid, exp: claims.exp };
   } catch {
@@ -47,9 +60,19 @@ export function verifyRealtimeTicket(token: string, now = Date.now()): TicketCla
 }
 
 /** Issues a ticket for the session the current request authenticated with. */
-export async function issueRealtimeTicket(sessionToken: string, userId: string): Promise<RealtimeTicket> {
-  const session = await prisma.session.findUnique({ where: { sessionToken }, select: { id: true, userId: true } });
-  if (!session || session.userId !== userId) throw new UnauthorizedError("Not signed in");
+export async function issueRealtimeTicket(
+  sessionToken: string,
+  userId: string,
+): Promise<RealtimeTicket> {
+  const session = await prisma.session.findUnique({
+    where: { sessionToken },
+    select: { id: true, userId: true },
+  });
+  if (!session || session.userId !== userId)
+    throw new UnauthorizedError("Not signed in");
   const exp = Date.now() + TICKET_TTL_MS;
-  return { token: signRealtimeTicket({ sid: session.id, uid: userId, exp }), expiresAt: new Date(exp).toISOString() };
+  return {
+    token: signRealtimeTicket({ sid: session.id, uid: userId, exp }),
+    expiresAt: new Date(exp).toISOString(),
+  };
 }

@@ -130,6 +130,16 @@ const schema = z.object({
   INTEGRITY_MEDIA_SECRET: optionalString,
 
   /**
+   * Key the desktop app signs its Secure-exam reports with (system check, heartbeat, finish).
+   * The same value is built into the app when it is packaged (EDORAX_SECURE_APP_KEY). Without
+   * it, production refuses Secure exams. Outside production a built-in development key is used.
+   */
+  SECURE_APP_SIGNING_KEY: optionalString.refine(
+    (value) => value === undefined || value.length >= 32,
+    "SECURE_APP_SIGNING_KEY must be at least 32 characters (for example: openssl rand -base64 32)",
+  ),
+
+  /**
    * Our own sentence-transformers service (backend-src/similarity-service) used to compare written
    * answers. Optional: without it the check falls back to word overlap.
    */

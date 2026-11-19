@@ -9,6 +9,7 @@ import {
   integrityCameraBody,
   integrityEventsBody,
   secureExchangeBody,
+  secureProofBody,
   secureStartBody,
 } from "../../validations/integrity.js";
 
@@ -82,7 +83,7 @@ router.post(
 );
 router.post(
   "/attempts/:attemptId/heartbeat",
-  validateParams(attemptParams),
+  validate({ params: attemptParams, body: secureProofBody }),
   userRateLimit({
     scope: "integrity-heartbeat",
     max: 30,
@@ -93,7 +94,7 @@ router.post(
 );
 router.post(
   "/attempts/:attemptId/secure/finish",
-  validateParams(attemptParams),
+  validate({ params: attemptParams, body: secureProofBody }),
   integrity.secureFinish,
 );
 

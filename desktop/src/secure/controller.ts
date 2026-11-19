@@ -19,6 +19,11 @@ import {
   type SecurePolicy,
   type SecurePrecheckReport,
 } from "../../../server/src/shared/api/integrity";
+import {
+  DEV_APP_SIGNING_KEY,
+  signProof,
+  type ProofAction,
+} from "../../../server/src/services/integrity/app-proof";
 import type { createPreviewClient } from "../api";
 import type { Result } from "../domain/catalog";
 import {
@@ -52,6 +57,22 @@ type Sitting = {
 };
 
 const CHECK_MAX_AGE_MS = 5 * 60 * 1000;
+
+// The key the server checks our reports against. It is baked in when the app is packaged (see
+// vite.main.config.mts). With enough effort anyone can pull it out of the app, so this stops the
+// easy bypass, not every one. The mentor review stays the final decision.
+const APP_KEY = process.env.EDORAX_SECURE_APP_KEY || DEV_APP_SIGNING_KEY;
+
+/** Signs one report for this attempt, right now, so it cannot be reused later or for something else. */
+function proofFor(
+  action: ProofAction,
+  attemptId: string,
+  report?: SecurePrecheckReport,
+) {
+  const ts = Date.now();
+  return { ts, sig: signProof(APP_KEY, action, attemptId, ts, report) };
+}
+
 const RESCAN_MS = 60 * 1000;
 const FLUSH_MS = 2 * 1000;
 const PING_MS = 8 * 1000;
@@ -165,6 +186,7 @@ export function installSecureExam(
     const result = await client.secureRequest(
       `/api/v1/integrity/attempts/${sitting.attemptId}/heartbeat`,
       "POST",
+      { proof: proofFor("heartbeat", sitting.attemptId) },
     );
     if (result.ok) {
       if (missedBeats >= 3) notice("Connection restored.");
@@ -213,6 +235,10 @@ export function installSecureExam(
         .secureRequest(
           `/api/v1/integrity/attempts/${current.attemptId}/secure/finish`,
           "POST",
+          // Only a Secure sitting has to prove it is the app. A standard quiz just says "done".
+          current.kind === "secure"
+            ? { proof: proofFor("finish", current.attemptId) }
+            : undefined,
         )
         .catch(() => undefined);
     }
@@ -445,7 +471,11 @@ export function installSecureExam(
     const started = await client.secureRequest(
       `/api/v1/integrity/attempts/${sitting.attemptId}/secure/start`,
       "POST",
-      { consent: true, precheck: report },
+      {
+        consent: true,
+        precheck: report,
+        proof: proofFor("start", sitting.attemptId, report),
+      },
     );
     if (!started.ok) return started;
     sitting.active = true;

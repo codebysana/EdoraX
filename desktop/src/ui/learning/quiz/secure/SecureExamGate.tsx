@@ -484,6 +484,11 @@ export function SecureExamGate({
             course can see the notes. If you cannot meet a requirement, ask your
             mentor for another way to sit the exam.
           </p>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            No check on a computer is perfectly safe. These checks make cheating
+            harder and leave a record. Your mentor reviews anything flagged and
+            makes the final call.
+          </p>
           {exam.policy?.requireCamera && (
             <CameraCard
               camera={exam.camera}

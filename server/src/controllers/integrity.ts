@@ -39,6 +39,7 @@ import type {
   IntegrityEventsBody,
   IntegrityReviewBody,
   SecureExchangeBody,
+  SecureProofBody,
   SecureStartBody,
 } from "../validations/integrity.js";
 
@@ -132,12 +133,20 @@ export async function secureStart(req: Request, res: Response) {
 // POST /api/v1/integrity/attempts/:attemptId/heartbeat
 export async function heartbeat(req: Request, res: Response) {
   res.set("Cache-Control", "no-store");
-  ok(res, await recordHeartbeat(req.user, req.params.attemptId as string));
+  const proof = (req.body as SecureProofBody)?.proof;
+  ok(
+    res,
+    await recordHeartbeat(req.user, req.params.attemptId as string, proof),
+  );
 }
 
 // POST /api/v1/integrity/attempts/:attemptId/secure/finish
 export async function secureFinish(req: Request, res: Response) {
-  ok(res, await finishSecureSession(req.user, req.params.attemptId as string));
+  const proof = (req.body as SecureProofBody)?.proof;
+  ok(
+    res,
+    await finishSecureSession(req.user, req.params.attemptId as string, proof),
+  );
 }
 
 // GET /api/v1/teach/courses/:courseId/integrity/flagged

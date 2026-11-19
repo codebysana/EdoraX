@@ -88,12 +88,26 @@ const precheckReport = z.object({
   checkedAt: z.string().datetime({ offset: true }),
 });
 
+/**
+ * The app's signature (see services/integrity/app-proof.ts). It is optional here on purpose: the
+ * service refuses a missing one with a clear message instead of a generic validation error.
+ */
+const appProof = z.object({
+  ts: z.number().int().positive(),
+  sig: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+});
+
 /** `consent` must be literally true: the app only sends this after the learner presses the consent button. */
 export const secureStartBody = z.object({
   consent: z.literal(true),
   precheck: precheckReport,
+  proof: appProof.optional(),
 });
 export type SecureStartBody = z.infer<typeof secureStartBody>;
+
+/** Heartbeat and finish carry nothing but the signature. */
+export const secureProofBody = z.object({ proof: appProof.optional() }).optional();
+export type SecureProofBody = z.infer<typeof secureProofBody>;
 export type SecureExchangeBody = z.infer<typeof secureExchangeBody>;
 
 export const integrityReviewBody = z.object({

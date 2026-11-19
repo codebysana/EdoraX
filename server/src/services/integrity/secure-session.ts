@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { env, isProduction } from "../../config/env.js";
 import { prisma } from "../../db/prisma.js";
 import {
   evaluateSecurePrecheck,
@@ -13,6 +14,13 @@ import type { SessionUser } from "../../types/auth.js";
 import { BadRequestError, ForbiddenError } from "../../utils/errors.js";
 import type { SecureStartBody } from "../../validations/integrity.js";
 import { recordIntegrityEvents, requireOwnAttempt } from "./attempts.js";
+import {
+  checkProof,
+  DEV_APP_SIGNING_KEY,
+  type AppProof,
+  type ProofAction,
+  type ProofPrecheck,
+} from "./app-proof.js";
 import { notifyIntegrity } from "./live.js";
 import { cameraPhotosAvailable } from "./snapshot-store.js";
 
@@ -24,6 +32,49 @@ import { cameraPhotosAvailable } from "./snapshot-store.js";
 const LIVE_WINDOW_MS = 60 * 1000;
 
 const eventId = () => randomBytes(9).toString("base64url");
+
+/** After the time limit, answers are still taken for this long, so the app's automatic save at zero goes through. */
+const TIME_GRACE_MS = 60 * 1000;
+
+/** When a sitting must end: its first consent plus the chapter's minutes. Null when the quiz has no time limit. */
+function sittingDeadline(
+  consentedAt: Date,
+  minutes: number | null | undefined,
+): number | null {
+  return minutes && minutes > 0
+    ? consentedAt.getTime() + minutes * 60_000 + TIME_GRACE_MS
+    : null;
+}
+
+/**
+ * Refuses a report that the desktop app did not sign for this attempt, this action and this
+ * moment. A browser can copy the request, but it cannot make the signature.
+ */
+function requireAppProof(
+  action: ProofAction,
+  attemptId: string,
+  proof: AppProof | undefined,
+  precheck?: ProofPrecheck,
+): void {
+  const key =
+    env.SECURE_APP_SIGNING_KEY ?? (isProduction ? null : DEV_APP_SIGNING_KEY);
+  if (!key)
+    throw new ForbiddenError(
+      "Secure exams are not set up on this server yet. Please tell your mentor.",
+      "SECURE_NOT_CONFIGURED",
+    );
+  const result = checkProof(key, action, attemptId, proof, precheck);
+  if (result.ok) return;
+  if (result.reason === "stale")
+    throw new ForbiddenError(
+      "The clock on this computer is wrong. Turn on automatic date and time, then try again.",
+      "APP_CLOCK_OFF",
+    );
+  throw new ForbiddenError(
+    "This step can only be done from the Edorax desktop app. Open the exam from the website with Start exam.",
+    "SECURE_APP_REQUIRED",
+  );
+}
 
 export async function securePolicyFor(
   chapterId: string,
@@ -55,6 +106,9 @@ export async function startSecureSession(
       "NOT_SECURE",
     );
 
+  // Only the desktop app can sign this report. A browser that copies it by hand is refused here.
+  requireAppProof("start", attemptId, body.proof, body.precheck);
+
   const policy = await securePolicyFor(attempt.chapterId);
   const verdict = evaluateSecurePrecheck(body.precheck, policy);
   if (!verdict.ok)
@@ -62,6 +116,21 @@ export async function startSecureSession(
 
   const now = new Date();
   const precheck = body.precheck as unknown as object;
+  // A sitting whose time ran out starts again from now, the same as the app's own clock does.
+  const [chapter, previous] = await Promise.all([
+    prisma.chapter.findUnique({
+      where: { id: attempt.chapterId },
+      select: { estimatedMinutes: true },
+    }),
+    prisma.secureExamSession.findUnique({
+      where: { attemptId },
+      select: { consentedAt: true },
+    }),
+  ]);
+  const deadline = previous
+    ? sittingDeadline(previous.consentedAt, chapter?.estimatedMinutes)
+    : null;
+  const timeRanOut = deadline !== null && now.getTime() > deadline;
   await prisma.secureExamSession.upsert({
     where: { attemptId },
     create: {
@@ -72,13 +141,14 @@ export async function startSecureSession(
       precheck,
       lastHeartbeatAt: now,
     },
-    // A resumed sitting (app restarted, power cut) keeps its first consent time.
+    // A resumed sitting (app restarted, power cut) keeps its first consent time, unless its time ran out.
     update: {
       platform: body.precheck.platform,
       appVersion: body.precheck.appVersion,
       precheck,
       lastHeartbeatAt: now,
       endedAt: null,
+      ...(timeRanOut ? { consentedAt: now } : {}),
     },
   });
 
@@ -105,8 +175,10 @@ export async function startSecureSession(
 export async function recordHeartbeat(
   user: SessionUser | undefined,
   attemptId: string,
+  proof?: AppProof,
 ): Promise<SecureHeartbeatResult> {
   await requireOwnAttempt(user, attemptId);
+  requireAppProof("heartbeat", attemptId, proof);
   const session = await prisma.secureExamSession.findUnique({
     where: { attemptId },
     select: { lastHeartbeatAt: true, endedAt: true },
@@ -154,8 +226,11 @@ export async function recordHeartbeat(
 export async function finishSecureSession(
   user: SessionUser | undefined,
   attemptId: string,
+  proof?: AppProof,
 ): Promise<{ ended: true }> {
-  await requireOwnAttempt(user, attemptId);
+  const attempt = await requireOwnAttempt(user, attemptId);
+  // A standard-mode quiz says "done" here too. Only a Secure sitting has to prove it is the app.
+  if (attempt.mode === "SECURE") requireAppProof("finish", attemptId, proof);
   const now = new Date();
   await prisma.$transaction([
     prisma.secureExamSession.updateMany({
@@ -184,6 +259,7 @@ export async function assertSecureSitting(
     select: {
       courseId: true,
       readerMode: true,
+      estimatedMinutes: true,
       course: { select: { integrityMode: true } },
     },
   });
@@ -202,11 +278,18 @@ export async function assertSecureSitting(
         enrollment: { userId, courseId: chapter.courseId },
       },
     },
-    select: { id: true },
+    select: { id: true, consentedAt: true },
   });
   if (!live)
     throw new ForbiddenError(
       "This exam must be taken in the Edorax desktop app. Open it from the website with Start exam.",
       "SECURE_REQUIRED",
+    );
+  // The app keeps its own clock too. This is the one the server believes.
+  const deadline = sittingDeadline(live.consentedAt, chapter.estimatedMinutes);
+  if (deadline !== null && Date.now() > deadline)
+    throw new ForbiddenError(
+      "Time is up for this exam.",
+      "SECURE_TIME_UP",
     );
 }

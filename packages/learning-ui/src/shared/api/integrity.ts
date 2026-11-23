@@ -135,6 +135,8 @@ export type IntegrityAttemptSummary = {
   risk: IntegrityRisk;
   /** The mentor's decision, if one was made. Only a person sets this. */
   review: IntegrityReviewRecord | null;
+  /** True while the learner's app or page has reported in during the last few seconds. */
+  online: boolean;
 };
 
 export type IntegrityAttemptDetail = IntegrityAttemptSummary & {
@@ -554,8 +556,44 @@ export type IntegrityReviewRecord = {
 };
 
 /** One row of the mentor's review queue. */
-export type IntegrityFlaggedAttempt = IntegrityAttemptSummary & {
+export type IntegrityLearnerAttempt = IntegrityAttemptSummary & {
+  enrollmentId: string;
   learner: { id: string; name: string | null };
+};
+
+/** One row of the mentor's review queue. */
+export type IntegrityFlaggedAttempt = IntegrityLearnerAttempt;
+
+/** A learner counts as online when something reached the server this recently. */
+export const INTEGRITY_ONLINE_WINDOW_MS = 25_000;
+
+/** Pushed to a course's mentors the moment an attempt changes. It carries the real, freshly read attempt. */
+export type IntegrityLiveUpdate = {
+  enrollmentId: string;
+  courseId: string;
+  attempt: IntegrityAttemptSummary;
+};
+
+/** The course-level live board: sittings from the last ten minutes, plus the review queue. */
+export type IntegrityOverview = {
+  course: { id: string; slug: string; title: string };
+  /** Every attempt this course has, so an empty live list can say whether any exist at all. */
+  totals: { attempts: number; lastSeenAt: string | null };
+  live: IntegrityLearnerAttempt[];
+  flagged: IntegrityLearnerAttempt[];
+  /** Only quizzes where at least one learner has submitted a written answer. */
+  quizChapters: Array<{ id: string; title: string; learners: number }>;
+  /** Plain facts about this course's integrity setup, so an empty board can be explained. */
+  health: {
+    mode: IntegrityMode;
+    cameraOn: boolean;
+    /** False when this server cannot store or sign camera photos. */
+    cameraAvailable: boolean;
+    eventsLastHour: number;
+    lastEventAt: string | null;
+    /** Live connections this mentor has open to the server. */
+    streamsOpen: number;
+  };
 };
 
 /** Two learners' answers that look alike. A prompt to read both, never proof of copying. */
@@ -567,4 +605,37 @@ export type IntegritySimilarPair = {
     { userId: string; name: string },
     { userId: string; name: string },
   ];
+};
+
+// ---------------------------------------------------------------------------
+// Rules shown before a quiz starts (website and desktop use the same words)
+// ---------------------------------------------------------------------------
+
+export const INTEGRITY_QUIZ_RULES: readonly string[] = [
+  "The quiz runs in full screen. Stay in full screen until you finish.",
+  "Do not switch to another window, tab or app. Your mentor can see every time you leave.",
+  "Copy, cut, paste, right-click, text selection and drag are turned off.",
+  "Screenshots and screen recording are not allowed.",
+  "Do not use other people, other devices or AI tools to help you.",
+  "Your mentor sees these notes as they happen: leaving the quiz, copy or paste attempts, screenshot keys, a second screen and unusually fast answers.",
+  "If your power or connection drops, open the quiz again and tell your mentor.",
+];
+
+/** Extra rules for exams that run in the desktop app. */
+export const INTEGRITY_SECURE_RULES: readonly string[] = [
+  "Before the exam starts, the app checks for remote access tools, screen recorders, AI apps, extra monitors and virtual machines.",
+  "Your clipboard is cleared when the exam starts, and screenshots show a blank window.",
+  "While the exam runs, the app reports to the server every few seconds. If it stops, your mentor sees a gap.",
+];
+
+export const INTEGRITY_NOTES_LINE = "Notes are viewed by your mentor.";
+
+/** Submitted written answers of a quiz, by learner name, so a mentor can read two side by side. */
+export type IntegrityWrittenAnswers = {
+  learners: Array<{ userId: string; name: string }>;
+  questions: Array<{
+    blockId: string;
+    number: number;
+    answers: Array<{ userId: string; name: string; text: string }>;
+  }>;
 };

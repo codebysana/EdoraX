@@ -524,6 +524,72 @@ test('desktop track updates use fixed endpoints and reject invalid action kinds'
   ]);
 });
 
+test('desktop highlight calls use fixed endpoints, check input and reject malformed replies', async () => {
+  const { createLearningClient } = await import('../src/api/learning');
+  const row = {
+    id: 'h1',
+    color: 'YELLOW',
+    quote: 'one thing',
+    prefix: null,
+    suffix: null,
+    occurrence: 0,
+    note: null,
+  };
+  const calls: unknown[] = [];
+  let reply: unknown = row;
+  const client = createLearningClient(async (path, method, body) => {
+    calls.push([path, method ?? 'GET', body]);
+    return { ok: true, data: reply };
+  });
+
+  const created = await client.highlights.create('chapter/1', {
+    color: 'GREEN',
+    quote: 'one thing',
+    prefix: 'Change ',
+    suffix: null,
+    occurrence: 0,
+    note: null,
+  });
+  assert.equal(created.ok && created.data.id, 'h1');
+  await client.highlights.update('h1', { note: 'Small steps' });
+  reply = null;
+  assert.deepEqual(await client.highlights.remove('h1'), { ok: true, data: null });
+  assert.deepEqual(calls, [
+    [
+      '/api/v1/chapters/chapter%2F1/highlights',
+      'POST',
+      { color: 'GREEN', quote: 'one thing', prefix: 'Change ', suffix: null, occurrence: 0, note: null },
+    ],
+    ['/api/v1/learner/highlights/h1', 'PATCH', { color: undefined, note: 'Small steps' }],
+    ['/api/v1/learner/highlights/h1', 'DELETE', undefined],
+  ]);
+
+  // Input the server would refuse is stopped before it leaves the app.
+  const before = calls.length;
+  for (const bad of [
+    client.highlights.create('chapter', { quote: '   ' }),
+    client.highlights.create('chapter', { quote: 'x'.repeat(501) }),
+    client.highlights.create('chapter', { quote: 'x', color: 'RED' as 'PINK' }),
+    client.highlights.create('chapter', { quote: 'x', note: 'n'.repeat(5001) }),
+    client.highlights.update('h1', { note: 'n'.repeat(5001) }),
+    client.highlights.update('', { note: 'x' }),
+    client.highlights.remove(''),
+    client.highlights.chapter(''),
+  ])
+    assert.equal((await bad).ok, false);
+  assert.equal(calls.length, before);
+
+  reply = [row, { ...row, id: 'h2' }];
+  const listed = await client.highlights.chapter('chapter');
+  assert.equal(listed.ok && listed.data.length, 2);
+  reply = [{ ...row, color: 'ORANGE' }];
+  assert.equal((await client.highlights.chapter('chapter')).ok, false);
+  reply = [row];
+  assert.equal((await client.highlights.all()).ok, false, 'a library row needs its course and chapter');
+  reply = [{ ...row, chapterId: 'c', chapterSlug: 'intro', chapterTitle: 'Intro', courseSlug: 'systems', courseTitle: 'Systems' }];
+  assert.equal((await client.highlights.all()).ok, true);
+});
+
 test('home catalog includes the private session after login and removes it after logout', async () => {
   const seen: Array<string | null> = [];
   const client = createPreviewClient(
@@ -653,6 +719,7 @@ test('offline store encrypts session, isolates users, deduplicates notes/checkli
         recap: { checks: '', open: '', next: '' },
         streakMilestone: null,
         headingNotes: {},
+        highlights: [],
         predictGate: false,
         predictRevealed: true,
         helpThread: null,

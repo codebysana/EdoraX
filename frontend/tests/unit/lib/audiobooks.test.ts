@@ -1,77 +1,59 @@
 import { describe, expect, it } from "vitest";
 import {
+  audiobookFromApi,
   bookListening,
-  buildAudiobook,
-  chapterTitleFromSlug,
   formatBookLength,
   formatPlayerClock,
-  manifestTracks,
   resumeTarget,
+  trackLabel,
   type BookState,
 } from "../../../src/lib/audiobooks";
+import type { PublicAudiobook } from "../../../src/shared/api/audiobooks";
 import { coverPalette, coverSvg, layoutTitle } from "../../../src/lib/audiobook-cover";
 import { COURSE_CATEGORY_INFO, categoryFromParam } from "../../../src/lib/course-categories";
 import { COURSE_CATEGORIES } from "../../../src/shared/domain/enums";
 
-const BASE = "https://audio.example.com";
-const MANIFEST = {
-  version: 1,
-  chapters: {
-    "2-1-set-the-scene": { file: "02.01-set-the-scene.mp3", minutes: 2, bytes: 1 },
-    "1-10-wrap-up": { file: "01.10-wrap-up.mp3", minutes: 1.5, bytes: 1 },
-    "1-2-roles-and-expectations": { file: "01.02-roles-and-expectations.mp3", minutes: 4, bytes: 1 },
-    "1-3-broken": { file: "../evil.sh", minutes: 2, bytes: 1 },
-    "1-4-empty": { file: "01.04-empty.mp3", minutes: 0, bytes: 1 },
-  },
+const API_BOOK: PublicAudiobook = {
+  slug: "collaboration",
+  title: "Collaboration",
+  description: "Working well with others.",
+  authorName: "Aisha Khan",
+  category: "SOFT_SKILLS",
+  publishedAt: "2026-11-01T00:00:00.000Z",
+  totalSeconds: 450,
+  tracks: [
+    { id: "2-1-set-the-scene", title: "Set the scene", position: 3, durationSeconds: 120, bytes: 1, src: "/api/v1/audiobooks/collaboration/tracks/2-1-set-the-scene/audio" },
+    { id: "1-2-roles-and-expectations", title: "Roles and expectations", position: 1, durationSeconds: 240, bytes: 1, src: "/api/v1/audiobooks/collaboration/tracks/1-2-roles-and-expectations/audio" },
+    { id: "1-10-wrap-up", title: "Wrap up", position: 2, durationSeconds: 90, bytes: 1, src: "/api/v1/audiobooks/collaboration/tracks/1-10-wrap-up/audio" },
+  ],
 };
-const COURSE = { slug: "collaboration", title: "Collaboration", description: null, category: "SOFT_SKILLS" as const, subcategory: null };
 
-describe("manifestTracks", () => {
-  it("keeps playable chapters in course order with part and chapter numbers", () => {
-    const tracks = manifestTracks(MANIFEST, BASE, "collaboration");
-    expect(tracks.map((t) => t.slug)).toEqual(["1-2-roles-and-expectations", "1-10-wrap-up", "2-1-set-the-scene"]);
-    expect(tracks[0]).toMatchObject({ title: "Roles and expectations", part: 1, chapter: 2, src: `${BASE}/collaboration/01.02-roles-and-expectations.mp3` });
-    expect(tracks[2]).toMatchObject({ part: 2, chapter: 1 });
-  });
+describe("audiobookFromApi", () => {
+  const book = audiobookFromApi(API_BOOK);
 
-  it("returns nothing for a missing or broken manifest", () => {
-    expect(manifestTracks(null, BASE, "x")).toEqual([]);
-    expect(manifestTracks({ chapters: {} }, BASE, "x")).toEqual([]);
-    expect(manifestTracks("<html>Not Found</html>", BASE, "x")).toEqual([]);
-  });
-
-  it("reads titles from slugs", () => {
-    expect(chapterTitleFromSlug("3.2-why-caches-help")).toBe("Why caches help");
-  });
-});
-
-describe("buildAudiobook", () => {
-  const tracks = manifestTracks(MANIFEST, BASE, "collaboration");
-
-  it("groups tracks into parts and uses the course outline for titles", () => {
-    const book = buildAudiobook(COURSE, tracks, {
-      modules: [
-        { order: 1, title: "How good teams work", chapters: [{ order: 2, title: "Roles, and expectations" }] },
-        { order: 2, title: "Feedback", chapters: [] },
-      ],
-    })!;
-    expect(book.author).toBe("Zeeshan Adil");
-    expect(book.totalMinutes).toBeCloseTo(7.5);
-    expect(book.tracks[0]!.title).toBe("Roles, and expectations");
-    expect(book.tracks[1]!.title).toBe("Wrap up");
-    expect(book.parts).toEqual([
-      { number: 1, title: "How good teams work", firstTrack: 0, trackCount: 2, minutes: 5.5 },
-      { number: 2, title: "Feedback", firstTrack: 2, trackCount: 1, minutes: 2 },
+  it("keeps chapters in book order, as numbered chapters without parts", () => {
+    expect(book.tracks.map((t) => [t.title, t.chapter, t.part])).toEqual([
+      ["Roles and expectations", 1, 0],
+      ["Wrap up", 2, 0],
+      ["Set the scene", 3, 0],
     ]);
+    expect(book.parts).toEqual([{ number: 0, title: null, firstTrack: 0, trackCount: 3, minutes: 7.5 }]);
+    expect(book.totalMinutes).toBe(7.5);
   });
 
-  it("has no book without audio", () => {
-    expect(buildAudiobook(COURSE, [])).toBeNull();
+  it("carries the author, category and audio address through", () => {
+    expect(book).toMatchObject({ slug: "collaboration", author: "Aisha Khan", category: "SOFT_SKILLS", subcategory: null, description: "Working well with others." });
+    expect(book.tracks[0]!.src).toBe("/api/v1/audiobooks/collaboration/tracks/1-2-roles-and-expectations/audio");
+  });
+
+  it("labels a chapter without a part number", () => {
+    expect(trackLabel(book.tracks[1]!)).toBe("Chapter 2");
+    expect(trackLabel({ part: 2, chapter: 3 })).toBe("Part 2, chapter 3");
   });
 });
 
 describe("listening progress", () => {
-  const book = buildAudiobook(COURSE, manifestTracks(MANIFEST, BASE, "collaboration"))!;
+  const book = audiobookFromApi(API_BOOK);
 
   it("starts a new book at chapter one", () => {
     expect(resumeTarget(book, undefined)).toEqual({ index: 0, at: 0, finished: false });

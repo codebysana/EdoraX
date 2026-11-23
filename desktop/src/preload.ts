@@ -194,7 +194,17 @@ const api: DesktopAPI = {
     saveLog: (id, answers) =>
       ipcRenderer.invoke("learning:save-log", id, answers),
     checklist: (id, item, checked) =>
-      ipcRenderer.invoke("learning:checklist", id, item, checked),
+      ipcRenderer.invoke('learning:checklist', id, item, checked),
+    highlights: {
+      chapter: (chapterId) =>
+        ipcRenderer.invoke('learning:highlights-chapter', chapterId),
+      all: () => ipcRenderer.invoke('learning:highlights-all'),
+      create: (chapterId, input) =>
+        ipcRenderer.invoke('learning:highlights-create', chapterId, input),
+      update: (id, patch) =>
+        ipcRenderer.invoke('learning:highlights-update', id, patch),
+      remove: (id) => ipcRenderer.invoke('learning:highlights-remove', id),
+    },
   },
   startLearning: (slug) => ipcRenderer.invoke('course:start-learning', slug),
   enroll: (courseId) => ipcRenderer.invoke('enrollment:create', courseId),

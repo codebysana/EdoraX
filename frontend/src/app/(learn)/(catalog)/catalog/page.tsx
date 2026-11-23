@@ -10,7 +10,6 @@ import { withoutGuidedTracks } from "@/lib/guided-labs";
 import { CatalogCourseCard } from "@/components/learn/catalog-course-card";
 import { CatalogCategoryTiles } from "@/components/learn/catalog-category-tiles";
 import { Dot } from "@/components/brand/dot";
-import { AreaTabs } from "@/components/areas/area-tabs";
 
 function CourseGrid({ courses }: { courses: CatalogCourseSummary[] }) {
   return (
@@ -79,8 +78,7 @@ export default async function CatalogPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-7 sm:px-6 sm:py-10 lg:px-8">
-      <AreaTabs />
-      <header className="mt-8">
+      <header>
         <h1 className="text-[32px] leading-tight tracking-[-0.035em] sm:text-[40px]">Explore courses</h1>
         <p className="mt-2 max-w-2xl text-lg text-muted-foreground">
           {user ? "Explore the catalog and find the next course for your learning goals." : "Look inside any course. You only need an account to enroll."}

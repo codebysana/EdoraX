@@ -22,6 +22,8 @@ export function CourseRatingModal({
   courseTitle,
   badgeLabel = "Course review",
   dismissLabel = "Cancel",
+  initialRating = 0,
+  initialReview = "",
   onSubmitted,
 }: {
   open: boolean;
@@ -30,15 +32,19 @@ export function CourseRatingModal({
   courseTitle?: string;
   badgeLabel?: string;
   dismissLabel?: string;
+  /** The learner's saved rating, so reopening the dialog edits it instead of starting blank. */
+  initialRating?: number;
+  initialReview?: string;
   onSubmitted?: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const confettiAnchorRef = useRef<HTMLDivElement>(null);
   const [soundOn, setSoundOn] = useRatingSound();
-  const [rating, setRating] = useState(0);
-  const [review, setReview] = useState("");
+  const [rating, setRating] = useState(initialRating);
+  const [review, setReview] = useState(initialReview);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [savedOnce, setSavedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,12 +59,14 @@ export function CourseRatingModal({
 
   function handleClose() {
     if (pending) return;
-    setRating(0);
-    setReview("");
+    setRating(initialRating);
+    setReview(initialReview);
     setSaved(false);
     setError(null);
     onClose();
   }
+
+  const isEditing = initialRating > 0;
 
   async function submit() {
     if (rating < 1) {
@@ -75,6 +83,7 @@ export function CourseRatingModal({
         fireMiniConfetti(confettiAnchorRef.current);
       }
       setSaved(true);
+      setSavedOnce(true);
       onSubmitted?.();
     } else {
       setError(res.error);
@@ -157,9 +166,18 @@ export function CourseRatingModal({
                 </h2>
                 <p id="course-rating-description" className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
                   Your rating helps future learners choose with confidence and helps us keep improving this course.
+                  You can change it any time from the lesson page or the course page.
                 </p>
                 <Button type="button" onClick={handleClose} className="mt-5 min-h-11 w-full rounded-[10px] font-semibold">
                   Continue learning
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setSaved(false)}
+                  className="mt-2 min-h-11 w-full rounded-[10px]"
+                >
+                  Change my review
                 </Button>
               </div>
             ) : (
@@ -169,7 +187,7 @@ export function CourseRatingModal({
                     id="course-rating-title"
                     className="font-heading text-lg font-bold leading-snug tracking-tight text-foreground sm:text-[21px]"
                   >
-                    {courseTitle ? `How is ${courseTitle} going?` : "Rate this course"}
+                    {isEditing ? "Change your review" : courseTitle ? `How is ${courseTitle} going?` : "Rate this course"}
                   </h2>
                   <p id="course-rating-description" className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
                     Your honest rating helps other learners decide and shapes future updates.
@@ -232,7 +250,7 @@ export function CourseRatingModal({
                     disabled={rating < 1 || pending}
                     className="min-w-36 rounded-[10px] font-semibold"
                   >
-                    {pending ? "Saving…" : "Submit review"}
+                    {pending ? "Saving…" : isEditing || savedOnce ? "Update review" : "Submit review"}
                   </Button>
                 </div>
               </>

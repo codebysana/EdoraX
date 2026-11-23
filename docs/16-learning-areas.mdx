@@ -18,7 +18,7 @@ area section is written so one work session can pick it up on its own.
 | Area | Route | Status | What it is |
 |---|---|---|---|
 | Courses | `/catalog`, `/my-courses`, `/courses/...` | Open | Full courses: read, play, listen, prove. |
-| Audiobooks | `/audiobooks`, `/audiobooks/[course]` | Open | Every narrated course as an audiobook, with a player that follows you across pages. |
+| Audiobooks | `/audiobooks`, `/audiobooks/[course]` | Open | Audiobooks that instructors upload and publish, with a player that follows you across pages. |
 | Labs | `/labs` | Partly open | Visual and guided labs open; shell labs planned. |
 | Bite-sized practice | `/practice` | Coming soon | One topic a few minutes a day, led by questions. |
 | Puzzles | `/puzzles` | Coming soon | Several kinds of daily puzzle. |
@@ -42,13 +42,13 @@ an area, change its `status` there and replace its overview page with the real f
 **Routes.** The area pages live in the `(catalog)` route group, next to `/catalog`, so they share its
 layout: public for visitors (a simple header with Courses, Labs and All areas), and inside the learner
 workspace shell for signed-in learners. They need no API and no database, so they render even when the
-API is down. The one exception is `/audiobooks`, which reads the catalog for course titles and shows an
+API is down. The one exception is `/audiobooks`, which reads the audiobook list and shows an
 empty state when the API is unreachable.
 
 ```
 frontend/src/app/(learn)/(catalog)/
   catalog/                 Courses (existing)
-  audiobooks/              Audiobooks: narrated courses as books, read from the live manifests
+  audiobooks/              Audiobooks: instructor-uploaded books, read from the API
   learn/                   The hub: every area on one page
   labs/                    Labs overview: the three kinds, open challenges, how a visual lab works
     visual/                Every visual lab, grouped
@@ -67,8 +67,6 @@ frontend/src/app/(learn)/(catalog)/
   Leaderboard and Questions.
 - Phone bottom bar keeps five slots: Home, **Learn** (opens `/learn`, active on any area page),
   Progress, Ranks, Questions.
-- Area tabs (`components/areas/area-tabs.tsx`) sit at the top of `/learn`, `/catalog` and every area
-  page, so moving between areas is one tap on a phone.
 - The landing page (`components/marketing/edorax/area-showcase.tsx`) shows all six areas with their
   status, and its header and footer link to Labs and All areas.
 
@@ -91,16 +89,18 @@ Replaced the Listen area in November 2026. `/listen` and anything under it redir
 (permanent, in `next.config.ts`).
 
 Code: `app/(learn)/(catalog)/audiobooks/page.tsx` (shelf), `audiobooks/[courseSlug]/page.tsx` (book page),
-`lib/audiobook-library.ts` (server loader), `lib/audiobooks.ts` and `lib/audiobook-cover.ts` (pure helpers,
+`lib/audiobook-library.ts` (server loader, reads the API), `lib/audiobooks.ts` and `lib/audiobook-cover.ts` (pure helpers,
 tested in `tests/unit/lib/audiobooks.test.ts`), `lib/audiobook-progress.ts` (saved place) and
 `components/audiobooks/` (cover, shelf, book page, player).
 
-- Books: the published catalog (`/api/v1/catalog`) joined with each course's live manifest at
-  `https://audio.edorax.com/<courseSlug>/manifest.json`, cached for five minutes. `NARRATION_BASE_URL`
-  (https only) points it elsewhere. A course shows up as soon as it has a manifest; nothing is generated here.
-- Tracks: the manifest's numbered files (`01.02-...mp3`) give the part and chapter; chapter and part titles
-  come from the public course outline (`/api/v1/catalog/<slug>`), falling back to the slug.
-- Covers: drawn as SVG from the title, subtitle (after the first colon), category and author (Zeeshan Adil)
+- Books: standalone, not tied to a course. An instructor creates a book in the teach workspace
+  (`/workspace/audiobooks`), uploads MP3 chapters, reorders them and publishes. Tables `Audiobook` and
+  `AudiobookTrack`; API under `/api/v1/audiobooks` (public, published books only) and
+  `/api/v1/teach/audiobooks` (owner or admin). The audio sits in the private R2 bucket under
+  `audiobooks/<bookId>/<trackId>.mp3` and is streamed by the API with range support, so unpublishing closes
+  it at once. Course narration (`audio.edorax.com`) is not listed here.
+- Tracks: one run of numbered chapters, no parts. Chapter titles and lengths are set at upload.
+- Covers: drawn as SVG from the title, subtitle (after the first colon), category and author name
   on the Edorax palette. The same SVG, turned into a PNG, is the lock-screen artwork.
 - Player: `AudiobookPlayerProvider` in the root layout, so audio keeps playing across pages. A mini player
   sits above the phone tab bar and beside the desktop sidebar (CSS variables `--audiobook-bar-*` in

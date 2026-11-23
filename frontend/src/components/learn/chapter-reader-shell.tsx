@@ -32,6 +32,7 @@ import type { StreakMilestone } from "@/shared/lib/streak";
 import { HeadingNotesProvider } from "@/components/learn/heading-note";
 import { ChapterAudio } from "@/components/learn/chapter-audio";
 import { CourseRatingPrompt } from "@/components/learn/course-rating-modal";
+import { ReaderRatingButton } from "@/components/learn/course-rating-link";
 import { AskChapterPanel } from "@/components/learn/ask-chapter-panel";
 import { AskChapterProvider } from "@/components/learn/ask-chapter-context";
 import { AskAiFloating, AskAiHeaderButton } from "@/components/learn/ask-ai-floating";
@@ -88,9 +89,12 @@ export function ChapterReaderShell({
   streakMilestone = null,
   headingNotes = {},
   highlights = [],
+  focusHighlightId = null,
   predictGate = false,
   predictRevealed = true,
   promptCourseRating = false,
+  canRateCourse = false,
+  myCourseRating = null,
   courseId,
   helpThread,
   narration = null,
@@ -122,9 +126,13 @@ export function ChapterReaderShell({
   streakMilestone?: StreakMilestone | null;
   headingNotes?: Record<string, string>;
   highlights?: ReaderHighlight[];
+  /** Set when the learner opened the chapter from a link to one highlight. */
+  focusHighlightId?: string | null;
   predictGate?: boolean;
   predictRevealed?: boolean;
   promptCourseRating?: boolean;
+  canRateCourse?: boolean;
+  myCourseRating?: { rating: number; review: string | null } | null;
   courseId: string;
   helpThread: HelpThreadView | null;
   /** Listen-along audio for this chapter, when its course has it. */
@@ -364,6 +372,9 @@ export function ChapterReaderShell({
                   onClick={() => setLeftCollapsed(!leftCollapsed)}
                 />
                 <AskAiHeaderButton />
+                {canRateCourse ? (
+                  <ReaderRatingButton courseSlug={courseSlug} courseTitle={courseTitle} rating={myCourseRating} />
+                ) : null}
                 <AskHelpDialog
                   open={mentorOpen}
                   onOpenChange={setMentorOpen}
@@ -508,7 +519,7 @@ export function ChapterReaderShell({
                 </ChapterLinkProvider>
 
                 {readerMode !== "QUIZ" ? (
-                  <ChapterHighlights chapterId={chapterId} initialHighlights={highlights} articleRef={articleRef} focusMode={focusMode} />
+                  <ChapterHighlights chapterId={chapterId} initialHighlights={highlights} articleRef={articleRef} focusMode={focusMode} focusHighlightId={focusHighlightId} />
                 ) : null}
 
                 {readerMode !== "QUIZ" ? <AskChapterPanel /> : null}

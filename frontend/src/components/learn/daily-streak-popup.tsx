@@ -79,7 +79,7 @@ function DayCell({
   onSelect: () => void;
 }) {
   const label = isToday
-    ? `${day.weekday}, today${todayActive ? ", streak locked in" : ", keep streak alive"}`
+    ? `${day.weekday}, today${todayActive ? ", counted" : ", not counted yet"}`
     : day.status === "completed"
       ? `${day.weekday}, completed`
       : `${day.weekday}, missed`;
@@ -230,9 +230,9 @@ export function DailyStreakPopup({ userId }: { userId: string }) {
 
   const selected = payload?.week.find((day) => day.day === selectedDay) ?? null;
   const subtitle = payload?.todayActive
-    ? "Today is locked in. See you tomorrow."
-    : "Open a lesson today to lock in your streak.";
-  const primaryLabel = payload?.todayActive ? "Checked in today · Ready" : "Got it · Keep learning";
+    ? "Today is counted. See you tomorrow."
+    : "Your streak counts by itself. Read a lesson or do an exercise today, no button needed.";
+  const primaryLabel = "Continue";
   const streakLabel =
     !payload || payload.streakCount <= 0
       ? "Start your streak"

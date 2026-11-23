@@ -911,7 +911,29 @@ else {
         return { ok: true as const, data: { queued: true } };
       });
     });
-    ipcMain.handle("learning:save-log", (event, id, answers) => {
+
+    // Highlights and notes need the server. They are not queued offline, so the reader shows the error and the learner can retry.
+    ipcMain.handle('learning:highlights-chapter', (event, chapterId) => {
+      requireRenderer(event);
+      return previewClient.learning.highlights.chapter(chapterId);
+    });
+    ipcMain.handle('learning:highlights-all', (event) => {
+      requireRenderer(event);
+      return previewClient.learning.highlights.all();
+    });
+    ipcMain.handle('learning:highlights-create', (event, chapterId, input) => {
+      requireRenderer(event);
+      return previewClient.learning.highlights.create(chapterId, input);
+    });
+    ipcMain.handle('learning:highlights-update', (event, id, patch) => {
+      requireRenderer(event);
+      return previewClient.learning.highlights.update(id, patch);
+    });
+    ipcMain.handle('learning:highlights-remove', (event, id) => {
+      requireRenderer(event);
+      return previewClient.learning.highlights.remove(id);
+    });
+    ipcMain.handle('learning:save-log', (event, id, answers) => {
       requireRenderer(event);
       return previewClient.learning
         .saveLog(id, answers)

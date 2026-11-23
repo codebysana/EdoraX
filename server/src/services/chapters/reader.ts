@@ -227,7 +227,7 @@ export async function loadChapterReader(courseSlug: string, chapterSlug: string,
     prisma.headingNote.findMany({ where: { userId: user.id, chapterId: chapter.id }, select: { headingId: true, body: true } }),
     prisma.courseRating.findUnique({
       where: { courseId_userId: { courseId: course.id, userId: user.id } },
-      select: { id: true },
+      select: { id: true, rating: true, review: true },
     }),
     prisma.chapterHighlight.findMany({ where: { userId: user.id, chapterId: chapter.id }, select: { id: true, color: true, quote: true, prefix: true, suffix: true, occurrence: true, note: true } }),
   ]);
@@ -295,6 +295,8 @@ export async function loadChapterReader(courseSlug: string, chapterSlug: string,
       predictRevealed: !predictGate || predictBlocks.every((block) => answeredIds.has(block.id)),
       helpThread: serializeHelpThread(helpThreadRow),
       promptCourseRating,
+      myCourseRating: existingRating ? { rating: existingRating.rating, review: existingRating.review } : null,
+      canRateCourse: !forDownload && moreThanHalfComplete,
     },
   };
 }

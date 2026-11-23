@@ -18,17 +18,17 @@ export type StreakPopupShouldShowInput = {
   seenOn: string | null;
   /** Learner's local today as "YYYY-MM-DD". */
   today: string;
-  streakCount: number;
-  /** True when the learner already has learning activity today. */
-  todayActive: boolean;
 };
 
 const WEEKDAY_INITIALS = ["S", "M", "T", "W", "T", "F", "S"] as const;
 
-/** Whether the daily streak popup should open for this local day. */
+/**
+ * Whether the daily streak popup should open for this local day. It opens once a day for every
+ * learner, including one with no streak yet or a broken one: that is the learner who most needs the
+ * nudge. Dismissing it only hides it until the next local day; it never changes the streak.
+ */
 export function shouldShowStreakPopup(input: StreakPopupShouldShowInput): boolean {
-  if (input.seenOn === input.today) return false;
-  return input.streakCount > 0 || input.todayActive;
+  return input.seenOn !== input.today;
 }
 
 /** Weekday initial for an ISO day key (UTC calendar day). */
@@ -74,7 +74,7 @@ export function buildStreakWeek(input: {
 export function streakDaySummary(day: StreakPopupDay, today: string): string {
   if (day.day === today) {
     if (day.seconds > 0) return `Today · ${formatStudyMinutes(day.seconds)} so far`;
-    return "Today is still open. Open a lesson to lock it in.";
+    return "Today is still open. Read a lesson or do an exercise and it counts on its own.";
   }
   if (day.status === "completed" || day.seconds > 0) {
     return `${formatDayLabel(day.day)} · ${formatStudyMinutes(day.seconds)}`;

@@ -11,33 +11,15 @@ describe("shouldShowStreakPopup", () => {
   const today = "2026-11-03";
 
   it("hides after dismiss on the same local day", () => {
-    expect(
-      shouldShowStreakPopup({ seenOn: today, today, streakCount: 4, todayActive: true })
-    ).toBe(false);
+    expect(shouldShowStreakPopup({ seenOn: today, today })).toBe(false);
   });
 
   it("shows again on a new local day", () => {
-    expect(
-      shouldShowStreakPopup({ seenOn: "2026-11-02", today, streakCount: 4, todayActive: false })
-    ).toBe(true);
+    expect(shouldShowStreakPopup({ seenOn: "2026-11-02", today })).toBe(true);
   });
 
-  it("shows when the learner has a streak even if today is still open", () => {
-    expect(
-      shouldShowStreakPopup({ seenOn: null, today, streakCount: 2, todayActive: false })
-    ).toBe(true);
-  });
-
-  it("shows for a first activity day with no prior streak", () => {
-    expect(
-      shouldShowStreakPopup({ seenOn: null, today, streakCount: 0, todayActive: true })
-    ).toBe(true);
-  });
-
-  it("hides for a brand-new learner with no streak and no activity", () => {
-    expect(
-      shouldShowStreakPopup({ seenOn: null, today, streakCount: 0, todayActive: false })
-    ).toBe(false);
+  it("shows on the first open, whatever the streak is", () => {
+    expect(shouldShowStreakPopup({ seenOn: null, today })).toBe(true);
   });
 });
 
@@ -115,6 +97,6 @@ describe("streak calculation for the popup week", () => {
     const today = "2026-11-03";
     const active = ["2026-10-31", "2026-11-01", "2026-11-02", "2026-11-03"];
     expect(computeStreak(active, today).count).toBe(4);
-    expect(shouldShowStreakPopup({ seenOn: null, today, streakCount: 4, todayActive: true })).toBe(true);
+    expect(shouldShowStreakPopup({ seenOn: null, today })).toBe(true);
   });
 });

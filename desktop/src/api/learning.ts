@@ -5,6 +5,11 @@ import type {
 import type { Result } from '../domain/catalog';
 import type { Lesson, BlockState, AnswerResult } from '../domain/learning';
 import type { AiInterviewSessionResult } from '../../../server/src/shared/api/ai';
+import type {
+  HighlightColor,
+  HighlightView,
+  UserHighlightView,
+} from '@buildment/learning-ui/components/learn/highlight-types';
 import { parseLesson } from '../learning/parse-lesson';
 import { isRecord } from './validation';
 type Request = (
@@ -21,6 +26,39 @@ const invalid = {
   code: 'INVALID_INPUT',
   message: 'Invalid lesson request.',
 };
+const colors = ['YELLOW', 'GREEN', 'BLUE', 'PINK'];
+const NOTE_MAX = 5000;
+function isHighlight(value: unknown): value is HighlightView {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.quote === 'string' &&
+    typeof value.color === 'string' &&
+    colors.includes(value.color) &&
+    typeof value.occurrence === 'number' &&
+    (value.note === null || typeof value.note === 'string')
+  );
+}
+function isUserHighlight(value: unknown): value is UserHighlightView {
+  return (
+    isHighlight(value) &&
+    typeof (value as Record<string, unknown>).chapterId === 'string' &&
+    typeof (value as Record<string, unknown>).chapterSlug === 'string' &&
+    typeof (value as Record<string, unknown>).chapterTitle === 'string' &&
+    typeof (value as Record<string, unknown>).courseSlug === 'string' &&
+    typeof (value as Record<string, unknown>).courseTitle === 'string'
+  );
+}
+const badHighlight = {
+  ok: false as const,
+  code: 'INVALID_RESPONSE',
+  message: 'The highlight could not be read.',
+};
+const optionalText = (value: unknown, max: number) =>
+  value === null ||
+  value === undefined ||
+  (typeof value === 'string' && value.length <= max);
+
 export function createLearningClient(request: Request) {
   return {
     async downloadChapter(course: string, chapter: string): Promise<Result<{
@@ -246,6 +284,96 @@ export function createLearningClient(request: Request) {
         'PUT',
         { checked },
       );
+    },
+    highlights: {
+      async chapter(chapterId: string): Promise<Result<HighlightView[]>> {
+        if (!valid(chapterId)) return invalid;
+        const result = await request(
+          '/api/v1/chapters/' + segment(chapterId) + '/highlights',
+        );
+        if (!result.ok) return result;
+        if (!Array.isArray(result.data) || !result.data.every(isHighlight))
+          return badHighlight;
+        return { ok: true, data: result.data };
+      },
+      async all(): Promise<Result<UserHighlightView[]>> {
+        const result = await request('/api/v1/learner/highlights');
+        if (!result.ok) return result;
+        if (!Array.isArray(result.data) || !result.data.every(isUserHighlight))
+          return badHighlight;
+        return { ok: true, data: result.data };
+      },
+      async create(
+        chapterId: string,
+        input: {
+          color?: HighlightColor;
+          quote: string;
+          prefix?: string | null;
+          suffix?: string | null;
+          occurrence?: number;
+          note?: string | null;
+        },
+      ): Promise<Result<HighlightView>> {
+        if (
+          !valid(chapterId) ||
+          !isRecord(input) ||
+          typeof input.quote !== 'string' ||
+          !input.quote.trim() ||
+          input.quote.length > 500 ||
+          (input.color !== undefined && !colors.includes(input.color)) ||
+          !optionalText(input.prefix, 100) ||
+          !optionalText(input.suffix, 100) ||
+          !optionalText(input.note, NOTE_MAX) ||
+          (input.occurrence !== undefined &&
+            !(Number.isInteger(input.occurrence) && input.occurrence >= 0 && input.occurrence <= 1000))
+        )
+          return invalid;
+        const result = await request(
+          '/api/v1/chapters/' + segment(chapterId) + '/highlights',
+          'POST',
+          {
+            color: input.color,
+            quote: input.quote,
+            prefix: input.prefix,
+            suffix: input.suffix,
+            occurrence: input.occurrence,
+            note: input.note,
+          },
+        );
+        if (!result.ok) return result;
+        return isHighlight(result.data)
+          ? { ok: true, data: result.data }
+          : badHighlight;
+      },
+      async update(
+        id: string,
+        patch: { color?: HighlightColor; note?: string | null },
+      ): Promise<Result<HighlightView>> {
+        if (
+          !valid(id) ||
+          !isRecord(patch) ||
+          (patch.color !== undefined && !colors.includes(patch.color)) ||
+          !optionalText(patch.note, NOTE_MAX)
+        )
+          return invalid;
+        const result = await request(
+          '/api/v1/learner/highlights/' + segment(id),
+          'PATCH',
+          { color: patch.color, note: patch.note },
+        );
+        if (!result.ok) return result;
+        return isHighlight(result.data)
+          ? { ok: true, data: result.data }
+          : badHighlight;
+      },
+      async remove(id: string): Promise<Result<null>> {
+        if (!valid(id)) return invalid;
+        const result = await request(
+          '/api/v1/learner/highlights/' + segment(id),
+          'DELETE',
+        );
+        return result.ok ? { ok: true, data: null } : result;
+      },
     },
   };
 }

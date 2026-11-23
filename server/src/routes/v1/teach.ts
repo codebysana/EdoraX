@@ -1,6 +1,7 @@
 import { requireInstructorWithdrawals } from "../../middlewares/instructor-withdrawals.js";
 import { raw, Router } from "express";
 import * as teach from "../../controllers/teach.js";
+import * as audiobooks from "../../controllers/audiobooks.js";
 import * as media from "../../controllers/course-media.js";
 import * as integrity from "../../controllers/integrity.js";
 import { authenticate } from "../../middlewares/authenticate.js";
@@ -50,6 +51,15 @@ import {
   unpublishCourseBody,
 } from "../../validations/teach.js";
 import {
+  audiobookIdParams,
+  audiobookTrackParams,
+  createAudiobookBody,
+  renameTrackBody,
+  reorderTracksBody,
+  updateAudiobookBody,
+  uploadTrackQuery,
+} from "../../validations/audiobooks.js";
+import {
   attemptParams,
   chapterIdParams,
   courseIntegrityBody,
@@ -70,6 +80,18 @@ router.post("/campaigns/:campaignId/participate", validate({ params: campaignIdP
 
 
 
+
+router.get("/audiobooks", audiobooks.teachList);
+router.post("/audiobooks", validateBody(createAudiobookBody), audiobooks.teachCreate);
+router.get("/audiobooks/:audiobookId", validateParams(audiobookIdParams), audiobooks.teachGet);
+router.patch("/audiobooks/:audiobookId", validate({ params: audiobookIdParams, body: updateAudiobookBody }), audiobooks.teachUpdate);
+router.delete("/audiobooks/:audiobookId", validateParams(audiobookIdParams), audiobooks.teachDelete);
+router.post("/audiobooks/:audiobookId/publish", validateParams(audiobookIdParams), audiobooks.teachPublish);
+router.post("/audiobooks/:audiobookId/unpublish", validateParams(audiobookIdParams), audiobooks.teachUnpublish);
+router.post("/audiobooks/:audiobookId/tracks", validate({ params: audiobookIdParams, query: uploadTrackQuery }), raw({ type: ["audio/mpeg", "audio/mp3"], limit: "50mb" }), audiobooks.teachAddTrack);
+router.put("/audiobooks/:audiobookId/tracks/order", validate({ params: audiobookIdParams, body: reorderTracksBody }), audiobooks.teachReorderTracks);
+router.patch("/audiobooks/:audiobookId/tracks/:trackId", validate({ params: audiobookTrackParams, body: renameTrackBody }), audiobooks.teachRenameTrack);
+router.delete("/audiobooks/:audiobookId/tracks/:trackId", validateParams(audiobookTrackParams), audiobooks.teachRemoveTrack);
 
 router.get("/courses", teach.listCourses);
 router.post(

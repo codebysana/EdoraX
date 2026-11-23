@@ -11,7 +11,7 @@ export default async function HighlightsPage() {
   } catch {
     return (
       <div className="p-6" role="alert">
-        <h1 className="text-xl font-semibold">My Highlights</h1>
+        <h1 className="text-xl font-semibold">My highlights and notes</h1>
         <p className="mt-4 text-sm text-muted-foreground">
           Your highlights could not be loaded. This is not the same as having none. Reload the page to try again.
         </p>

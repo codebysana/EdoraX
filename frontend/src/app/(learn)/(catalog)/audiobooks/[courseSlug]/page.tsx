@@ -5,7 +5,6 @@ import { ArrowLeft } from "lucide-react";
 import { SITE_SHARE_IMAGE } from "@/lib/site";
 import { loadAudiobook } from "@/lib/audiobook-library";
 import { categoryLabel, formatBookLength } from "@/lib/audiobooks";
-import { AreaTabs } from "@/components/areas/area-tabs";
 import { BookCover } from "@/components/audiobooks/book-cover";
 import { BookResume, TrackList } from "@/components/audiobooks/book-detail-client";
 
@@ -30,10 +29,9 @@ export default async function AudiobookPage({ params }: Params) {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-7 sm:px-6 sm:py-10 lg:px-8">
-      <AreaTabs />
       <Link
         href="/audiobooks"
-        className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-sm text-base font-bold text-primary outline-none hover:underline focus-visible:outline-3 focus-visible:outline-brand-yellow"
+        className="inline-flex min-h-11 items-center gap-2 rounded-sm text-base font-bold text-primary outline-none hover:underline focus-visible:outline-3 focus-visible:outline-brand-yellow"
       >
         <ArrowLeft aria-hidden className="size-4" />
         All audiobooks
@@ -55,19 +53,13 @@ export default async function AudiobookPage({ params }: Params) {
             <span className="font-bold">{book.author}</span>
           </p>
           <p className="mt-1 text-base tabular-nums text-muted-foreground">
-            {formatBookLength(book.totalMinutes)} · {book.parts.length} {book.parts.length === 1 ? "part" : "parts"} · {book.tracks.length} chapters
+            {formatBookLength(book.totalMinutes)} · {book.parts.length > 1 ? `${book.parts.length} parts · ` : ""}
+            {book.tracks.length} {book.tracks.length === 1 ? "chapter" : "chapters"}
           </p>
 
           <BookResume book={book} />
 
           {book.description ? <p className="mt-8 max-w-2xl text-base leading-relaxed text-muted-foreground">{book.description}</p> : null}
-          <p className="mt-3 text-base">
-            <Link href={`/catalog/${book.slug}`} className="rounded-sm font-bold text-primary underline-offset-4 outline-none hover:underline focus-visible:outline-3 focus-visible:outline-brand-yellow">
-              Read the course
-            </Link>
-            <span className="text-muted-foreground">: the same chapters with diagrams, labs and quizzes.</span>
-          </p>
-
           <h2 className="mt-10 text-2xl tracking-[-0.02em]">Chapters</h2>
           <div className="mt-4">
             <TrackList book={book} />

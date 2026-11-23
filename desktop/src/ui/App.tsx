@@ -8,6 +8,7 @@ import { Sidebar, type Section } from './layout/Sidebar';
 import { HomePage } from './home/HomePage';
 import { ProgressPage } from './progress/ProgressPage';
 import { MyLearningPage } from './mylearning/MyLearningPage';
+import { HighlightsPage } from './highlights/HighlightsPage';
 import { WorkspaceHeader } from './layout/WorkspaceHeader';
 import { useSession } from './auth/useSession';
 import { SignInPrompt } from './auth/SignInPrompt';
@@ -16,6 +17,7 @@ import { MiniPlayer } from './audiobooks/MiniPlayer';
 import { VisualLabs } from './visual-labs/VisualLabs';
 import { ShellLabs } from './shell-labs/ShellLabs';
 import type { ShellTopic } from '../domain/shell-labs';
+import type { UserHighlightView } from '@buildment/learning-ui/components/learn/highlight-types';
 import { BrandMark } from './auth/BrandMark';
 import { LeaderboardPage } from './leaderboard/LeaderboardPage';
 import { StreakPopup } from './streak/StreakPopup';
@@ -31,6 +33,8 @@ export function App() {
   const [selected, setSelected] = useState<Course | null>(null);
   const [chapter, setChapter] = useState<string | undefined>();
   const [reading, setReading] = useState(false);
+  // Set when a lesson is opened from the notebook, so the reader scrolls to that highlight.
+  const [focusHighlight, setFocusHighlight] = useState<string | undefined>();
   const session = useSession();
   const update = useAppUpdate();
   const {
@@ -59,6 +63,10 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!reading) setFocusHighlight(undefined);
+  }, [reading]);
+
   const { track: trackDot } = useDotVoice();
   useEffect(() => {
     if (signedIn) void trackDot({ type: 'session_start' });
@@ -81,6 +89,16 @@ export function App() {
   function openBySlug(slug: string) {
     const course = courses.find((item) => item.slug === slug);
     if (course) openCourse(course);
+  }
+
+  function openHighlight(highlight: UserHighlightView): boolean {
+    const course = courses.find((item) => item.slug === highlight.courseSlug);
+    if (!course) return false;
+    openCourse(course);
+    setChapter(highlight.chapterSlug);
+    setFocusHighlight(highlight.id);
+    setReading(true);
+    return true;
   }
 
   function backToCourses() {
@@ -280,6 +298,12 @@ export function App() {
               courseSlug={selected.slug}
               courseTitle={selected.title}
               initialChapter={chapter}
+              focusHighlightId={focusHighlight}
+              onOpenHighlights={() => {
+                setReading(false);
+                setSelected(null);
+                navigate('highlights');
+              }}
               session={session}
               onBack={() => setReading(false)}
               onSignedOut={() => {
@@ -312,6 +336,8 @@ export function App() {
             />
           ) : section === 'mine' ? (
             <MyLearningPage onOpenCourse={openBySlug} onBrowse={() => navigate('courses')} />
+          ) : section === 'highlights' ? (
+            <HighlightsPage onOpenChapter={openHighlight} />
           ) : section === 'questions' ? (
             <QuestionsPage />
           ) : section === 'settings' ? (

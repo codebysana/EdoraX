@@ -40,6 +40,10 @@ export type ChapterReaderContent = {
   helpThread: HelpThreadView | null;
   /** True when the learner finished more than half of the course, moved on, and has neither rated nor dismissed the prompt. */
   promptCourseRating?: boolean;
+  /** The learner's own course rating, so the lesson page can offer to change it. Null when none yet. */
+  myCourseRating?: { rating: number; review: string | null } | null;
+  /** True once the learner is past halfway, so the lesson page offers the rating button. */
+  canRateCourse?: boolean;
 };
 
 export type ChapterReaderView = {

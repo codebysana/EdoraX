@@ -20,7 +20,7 @@ const config: ForgeConfig = {
     },
   },
   packagerConfig: {
-    asar: { unpack: "**/node_modules/node-pty/**" },
+    asar: { unpack: '**/node_modules/node-pty/**' },
     // Vite bundles application code; retain the native PTY module for rebuilding.
     ignore: (file) =>
       Boolean(file) &&
@@ -37,7 +37,7 @@ const config: ForgeConfig = {
       // Staged by scripts/stage-ide.mjs; still lands at resources/ide.
       './.ide-bundle/ide',
     ],
-    // Lets the website open an exam in the app with an edorax:// link.
+     // Lets the website open an exam in the app with an edorax:// link.
     protocols: [
       {
         name: 'Edorax exam',
@@ -97,20 +97,20 @@ const config: ForgeConfig = {
       build: [
         {
           // `entry` is just an alias for `build.lib.entry` in the corresponding file of `config`.
-          entry: "src/main.ts",
-          config: "vite.main.config.mts",
-          target: "main",
+          entry: 'src/main.ts',
+          config: 'vite.main.config.mts',
+          target: 'main',
         },
         {
-          entry: "src/preload.ts",
-          config: "vite.preload.config.mts",
-          target: "preload",
+          entry: 'src/preload.ts',
+          config: 'vite.preload.config.mts',
+          target: 'preload',
         },
       ],
       renderer: [
         {
-          name: "main_window",
-          config: "vite.renderer.config.mts",
+          name: 'main_window',
+          config: 'vite.renderer.config.mts',
         },
       ],
     }),

@@ -1,11 +1,11 @@
 // GENERATED from server/src/shared — do not edit here. Run `pnpm sync-shared` in server/.
-import type { HelpThreadStatus } from "../domain/enums.js";
-import type { HelpMessageView } from "./help.js";
-import type { IntegrityLiveUpdate } from "./integrity.js";
+import type { HelpThreadStatus } from "../domain/enums";
+import type { HelpMessageView } from "./help";
+import type { IntegrityLiveUpdate } from "./integrity";
 import type {
   NotificationNewEvent,
   NotificationReadResult,
-} from "./notifications.js";
+} from "./notifications";
 
 // Wire contract for GET /api/v1/events/stream (Server-Sent Events). One stream per
 // browser; the server pushes only to the signed-in user it belongs to.

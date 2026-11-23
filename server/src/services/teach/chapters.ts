@@ -47,18 +47,8 @@ import type {
   MoveDirection,
 } from "../../validations/teach.js";
 import { requireCourseById } from "./access.js";
-import {
-  applyBlockSyncPlans,
-  planChapterBlockSync,
-  prepareChapterBlockSync,
-  syncChapterBlocksFromSource,
-  type ExistingSyncBlock,
-} from "./sync-blocks.js";
-import {
-  ensureBaselineRelease,
-  type ReleaseContent,
-  variantForRelease,
-} from "../courses/releases.js";
+import { applyBlockSyncPlans, planChapterBlockSync, prepareChapterBlockSync, syncChapterBlocksFromSource, type ExistingSyncBlock } from "./sync-blocks.js";
+import { ensureBaselineRelease, readReleaseContent, variantForRelease } from "../courses/releases.js";
 import { resolveCourseFamily } from "../../shared/lib/course-tracks.js";
 import {
   publishDashboardChapterRelease,
@@ -84,23 +74,12 @@ async function requireChapter(user: SessionUser, chapterId: string) {
       select: { activeReleaseId: true },
     });
     if (active.activeReleaseId) {
-      const release = await prisma.courseRelease.findUniqueOrThrow({
-        where: { id: active.activeReleaseId },
-      });
-      const family = await prisma.course.findUniqueOrThrow({
-        where: { id: chapter.courseId },
-        select: { familySlug: true, variantFamily: true },
-      });
-      const defaultSlug = variantForRelease(
-        resolveCourseFamily(family.familySlug, family.variantFamily),
-        null,
-      );
-      const visible = (
-        (release.content as unknown as ReleaseContent).variants[defaultSlug] ??
-        []
-      ).some((module) =>
-        module.chapters.some((item) => item.id === chapter.id),
-      );
+      const release = await prisma.courseRelease.findUniqueOrThrow({ where: { id: active.activeReleaseId } });
+      const family = await prisma.course.findUniqueOrThrow({ where: { id: chapter.courseId },
+        select: { familySlug: true, variantFamily: true } });
+      const defaultSlug = variantForRelease(resolveCourseFamily(family.familySlug, family.variantFamily), null);
+      const visible = (readReleaseContent(release.content).variants[defaultSlug] ?? [])
+        .some(module => module.chapters.some(item => item.id === chapter.id));
       if (!visible) throw new NotFoundError("Chapter not found");
     }
   }
@@ -123,42 +102,15 @@ async function releasedChapterDraft(
   status: string,
 ) {
   if (status !== "PUBLISHED" && status !== "ARCHIVED") return null;
-  const release = await prisma.$transaction((tx) =>
-    ensureBaselineRelease(tx, chapter.courseId),
-  );
-  const course = await prisma.course.findUniqueOrThrow({
-    where: { id: chapter.courseId },
-    select: { familySlug: true, variantFamily: true },
-  });
-  const shared =
-    (release.content as unknown as ReleaseContent).variants[
-      variantForRelease(
-        resolveCourseFamily(course.familySlug, course.variantFamily),
-        null,
-      )
-    ] ?? [];
-  if (
-    !shared.some((module) =>
-      module.chapters.some((item) => item.id === chapter.id),
-    )
-  )
-    return null;
-  return prisma.courseChapterDraft.upsert({
-    where: { chapterId: chapter.id },
-    create: {
-      chapterId: chapter.id,
-      courseId: chapter.courseId,
-      baseReleaseId: release.id,
-      title: chapter.title,
-      summary: chapter.summary,
-      estimatedMinutes: chapter.estimatedMinutes,
-      readerMode: chapter.readerMode,
-      quizPassingScore: chapter.quizPassingScore,
-      isMilestone: chapter.isMilestone,
-      source: chapter.compiled ?? chapter.source,
-    },
-    update: {},
-  });
+  const release = await prisma.$transaction(tx => ensureBaselineRelease(tx, chapter.courseId));
+  const course = await prisma.course.findUniqueOrThrow({ where: { id: chapter.courseId }, select: { familySlug: true, variantFamily: true } });
+  const shared = readReleaseContent(release.content).variants[variantForRelease(resolveCourseFamily(course.familySlug, course.variantFamily), null)] ?? [];
+  if (!shared.some(module => module.chapters.some(item => item.id === chapter.id))) return null;
+  return prisma.courseChapterDraft.upsert({ where: { chapterId: chapter.id },
+    create: { chapterId: chapter.id, courseId: chapter.courseId, baseReleaseId: release.id,
+      title: chapter.title, summary: chapter.summary, estimatedMinutes: chapter.estimatedMinutes,
+      readerMode: chapter.readerMode, quizPassingScore: chapter.quizPassingScore, isMilestone: chapter.isMilestone, source: chapter.compiled ?? chapter.source },
+    update: {} });
 }
 
 /** Titles and summaries show in navigation, the catalogue and emails, where placeholders never resolve. */
@@ -241,17 +193,10 @@ export async function moveChapter(
       select: { activeReleaseId: true, familySlug: true, variantFamily: true },
     });
     if (current.activeReleaseId) {
-      const release = await prisma.courseRelease.findUniqueOrThrow({
-        where: { id: current.activeReleaseId },
-      });
-      const defaultSlug = variantForRelease(
-        resolveCourseFamily(current.familySlug, current.variantFamily),
-        null,
-      );
-      activeIds = (
-        (release.content as unknown as ReleaseContent).variants[defaultSlug] ??
-        []
-      ).flatMap((module) => module.chapters.map((item) => item.id));
+      const release = await prisma.courseRelease.findUniqueOrThrow({ where: { id: current.activeReleaseId } });
+      const defaultSlug = variantForRelease(resolveCourseFamily(current.familySlug, current.variantFamily), null);
+      activeIds = (readReleaseContent(release.content).variants[defaultSlug] ?? [])
+        .flatMap(module => module.chapters.map(item => item.id));
     }
   }
   const neighbor = await prisma.chapter.findFirst({
@@ -385,35 +330,12 @@ export async function publishChapter(
   chapterId: string,
 ): Promise<void> {
   const { chapter, course } = await requireChapter(user, chapterId);
-  let draft = await prisma.courseChapterDraft.findUnique({
-    where: { chapterId },
-  });
-  if (
-    !draft &&
-    (course.status === "PUBLISHED" || course.status === "ARCHIVED")
-  ) {
-    const release = await prisma.$transaction((tx) =>
-      ensureBaselineRelease(tx, course.id),
-    );
-    const familyCourse = await prisma.course.findUniqueOrThrow({
-      where: { id: course.id },
-      select: { familySlug: true, variantFamily: true },
-    });
-    const shared =
-      (release.content as unknown as ReleaseContent).variants[
-        variantForRelease(
-          resolveCourseFamily(
-            familyCourse.familySlug,
-            familyCourse.variantFamily,
-          ),
-          null,
-        )
-      ] ?? [];
-    if (
-      shared.some((module) =>
-        module.chapters.some((item) => item.id === chapterId),
-      )
-    ) {
+  let draft = await prisma.courseChapterDraft.findUnique({ where: { chapterId } });
+  if (!draft && (course.status === "PUBLISHED" || course.status === "ARCHIVED")) {
+    const release = await prisma.$transaction(tx => ensureBaselineRelease(tx, course.id));
+    const familyCourse = await prisma.course.findUniqueOrThrow({ where: { id: course.id }, select: { familySlug: true, variantFamily: true } });
+    const shared = readReleaseContent(release.content).variants[variantForRelease(resolveCourseFamily(familyCourse.familySlug, familyCourse.variantFamily), null)] ?? [];
+    if (shared.some(module => module.chapters.some(item => item.id === chapterId))) {
       if (chapter.source === chapter.compiled) return;
       draft = await releasedChapterDraft(chapter, course.status);
       if (draft)

@@ -13,7 +13,14 @@ import { assertSecureSitting } from "../integrity/secure-session.js";
 import type { QuizChapterState } from "../../shared/api/blocks.js";
 import { loadQuizChapterState } from "./quiz-state.js";
 
-type Grade = { blockId: string; score: number | null; maxScore: number | null; isCorrect: boolean | null };
+type Grade = {
+  blockId: string;
+  score: number | null;
+  maxScore: number | null;
+  isCorrect: boolean | null;
+  explanation?: string;
+  correctOptionIds?: string[];
+};
 
 export type QuizSubmitResult = {
   score: number;
@@ -155,16 +162,20 @@ export async function submitChapterQuiz(input: {
     return results;
   });
 
-  const assessment = (await loadQuizChapterState(chapterId, learner.id))
-    .assessment;
+  const state = await loadQuizChapterState(chapterId, learner.id);
   return {
     score: grades.reduce((sum, item) => sum + (item.score ?? 0), 0),
     maxScore: grades.reduce((sum, item) => sum + (item.maxScore ?? 0), 0),
     questions: grades.length,
-    grades: grades.map((item) => ({
-      ...item,
-      selected: answersByBlock.get(item.blockId) ?? [],
-    })),
-    assessment,
+    grades: grades.map((item) => {
+      const stored = state.initialBlockGrades[item.blockId];
+      return {
+        ...item,
+        selected: stored?.selected ?? answersByBlock.get(item.blockId) ?? [],
+        explanation: stored?.explanation,
+        correctOptionIds: stored?.correctOptionIds,
+      };
+    }),
+    assessment: state.assessment,
   };
 }

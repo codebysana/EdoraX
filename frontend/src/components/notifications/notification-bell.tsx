@@ -63,6 +63,7 @@ const ACTION_LABEL: Partial<Record<NotificationType, string>> = {
   "enrollment.created": "Open course",
   "enrollment.new_learner": "View learners",
   "course.completed": "What's next",
+  "certificate.issued": "View certificate",
   "course.learner_completed": "View learners",
   "study.reminder": "Continue learning",
   "course.suggestion": "View course",

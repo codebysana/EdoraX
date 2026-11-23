@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Lock } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ChapterCompletionStrip } from "@/components/learn/mark-chapter-complete";
+import { CertificateCard } from "@/blocks/capstone-check/CertificateCard";
 import type { StreakMilestone } from "@/shared/lib/streak";
 
 type NavChapter = {
@@ -200,12 +201,17 @@ export function ChapterNav({
   const hasBoth = Boolean(prev && next);
   const hasLessonNav = Boolean(prev || next);
 
+  // On the last chapter of a finished course the certificate stays here, so the learner can find it again later.
+  const showCertificate = !next && courseTotal > 0 && courseCompleted >= courseTotal;
+
   return (
+    <>
     <nav aria-label="Chapter navigation" className="mt-10">
       <div className="overflow-hidden rounded-xl border border-border bg-card text-card-foreground ">
         <div className="border-b border-border bg-muted/40 px-5 py-5 sm:px-6">
           <ChapterCompletionStrip
             chapterId={chapterId}
+            courseSlug={courseSlug}
             nextLocked={Boolean(nextLocked)}
             chapterComplete={chapterComplete}
             canMarkComplete={canMarkComplete}
@@ -248,5 +254,7 @@ export function ChapterNav({
         ) : null}
       </div>
     </nav>
+    {showCertificate ? <div className="mt-4"><CertificateCard courseSlug={courseSlug} /></div> : null}
+    </>
   );
 }

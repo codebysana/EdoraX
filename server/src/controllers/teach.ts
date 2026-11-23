@@ -1,3 +1,4 @@
+import { instructorWithdrawalsEnabled } from "../middlewares/instructor-withdrawals.js";
 import * as courseImport from "../services/teach/course-import.js";
 import type { Request, Response } from "express";
 import { created, noContent, ok } from "../utils/responses.js";
@@ -14,13 +15,14 @@ import * as helpInbox from "../services/teach/help-inbox.js";
 import * as courseTeam from "../services/teach/course-team.js";
 import type {
   ChapterSettingsBody,
-  CourseSettingsBody,
+  CourseCertificateTemplateBody, CourseSettingsBody,
   CreateChapterBody,
   CreateCourseBody,
   HelpInboxQuery,
   MoveDirection,
   SubmitReviewBody,
   courseInstructorInviteBody,
+  CreateInstructorCouponBody,
 } from "../validations/teach.js";
 
 // Instructor workspace. Every handler runs behind authenticate + requireVerified +
@@ -52,6 +54,22 @@ export async function getCourseSettings(req: Request, res: Response) {
   ok(res, await courses.loadCourseSettings(req.user!, param(req, "courseSlug")));
 }
 
+export async function listCourseCoupons(req: Request, res: Response) {
+  const coupons = await import("../services/teach/course-coupons.js");
+  ok(res, await coupons.listCourseCoupons(req.user!, param(req, "courseSlug")));
+}
+
+export async function createCourseCoupon(req: Request, res: Response) {
+  const coupons = await import("../services/teach/course-coupons.js");
+  created(res, await coupons.createCourseCoupon(req.user!, param(req, "courseId"), req.body as CreateInstructorCouponBody));
+}
+
+export async function setCourseCouponActive(req: Request, res: Response) {
+  const coupons = await import("../services/teach/course-coupons.js");
+  await coupons.setCourseCouponActive(req.user!, param(req, "courseId"), param(req, "couponId"), (req.body as { active: boolean }).active);
+  noContent(res);
+}
+
 export async function getCourseDraftPreview(req: Request, res: Response) {
   ok(res, await courses.loadCourseDraftPreview(req.user!, param(req, "courseSlug")));
 }
@@ -81,6 +99,12 @@ export async function revokeCourseInstructorInvite(req: Request, res: Response) 
 // PATCH /api/v1/teach/courses/:courseId/settings
 export async function updateCourseSettings(req: Request, res: Response) {
   await courses.updateCourseSettings(req.user!, param(req, "courseId"), req.body as CourseSettingsBody);
+  noContent(res);
+}
+
+// PUT /api/v1/teach/courses/:courseId/certificate-template
+export async function setCourseCertificateTemplate(req: Request, res: Response) {
+  await courses.setCourseCertificateTemplate(req.user!, param(req, "courseId"), req.body as CourseCertificateTemplateBody);
   noContent(res);
 }
 
@@ -274,4 +298,30 @@ export async function publishCourseChapters(req: Request, res: Response) {
 export async function publishModuleChapters(req: Request, res: Response) {
   await chapters.publishChapters(req.user!, { moduleId: param(req, "moduleId") });
   noContent(res);
+}
+
+// GET /api/v1/teach/wallet
+export async function getWallet(req: Request, res: Response) {
+  const { getInstructorWallet } = await import("../services/financials/withdrawals.js");
+  ok(res, { ...await getInstructorWallet(req.user!.id), withdrawalsEnabled: instructorWithdrawalsEnabled() });
+}
+
+// POST /api/v1/teach/wallet/withdraw
+export async function requestWithdrawal(req: Request, res: Response) {
+  const { requestInstructorWithdrawal } = await import("../services/financials/withdrawals.js");
+  const { note } = req.body as { note: string };
+  created(res, await requestInstructorWithdrawal(req.user!.id, note));
+}
+
+// GET /api/v1/teach/campaigns
+export async function getCampaigns(req: Request, res: Response) {
+  const { listInstructorCampaigns } = await import("../services/teach/campaigns.js");
+  ok(res, await listInstructorCampaigns(req.user!));
+}
+
+// POST /api/v1/teach/campaigns/:campaignId/participate
+export async function participateCampaign(req: Request, res: Response) {
+  const { setInstructorCampaignParticipation } = await import("../services/teach/campaigns.js");
+  const { courseIds } = req.body as { courseIds: string[] };
+  ok(res, await setInstructorCampaignParticipation(req.user!, param(req, "campaignId"), courseIds));
 }

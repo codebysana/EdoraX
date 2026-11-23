@@ -3,6 +3,11 @@ import type { Prisma } from "../../generated/prisma/index.js";
 import { prisma } from "../../db/prisma.js";
 import { resolveCourseFamily, type CourseFamily } from "../../shared/lib/course-tracks.js";
 import { NotFoundError } from "../../utils/errors.js";
+import { cleanChapterSlug } from "../chapters/chapter-slug.js";
+import { recomputeEnrollmentRollup } from "../progress/compute.js";
+import { canonical } from "../teach/course-update-matching.js";
+
+export { cleanChapterSlug } from "../chapters/chapter-slug.js";
 
 export type ReleaseChapter = {
   id: string; key: string | null; slug: string; title: string; order: number;
@@ -10,7 +15,43 @@ export type ReleaseChapter = {
   quizPassingScore: number;
 };
 export type ReleaseModule = { id: string; key: string | null; title: string; order: number; chapters: ReleaseChapter[] };
-export type ReleaseContent = { variants: Record<string, ReleaseModule[]> };
+/** `redirects` maps the address of a lesson a release removed to the address that replaced it. */
+export type ReleaseContent = { variants: Record<string, ReleaseModule[]>; redirects?: Record<string, string> };
+
+/** Where a removed lesson's address leads now, or null. Follows a chain of removals, never a loop. */
+export function redirectedChapterSlug(content: ReleaseContent | null | undefined, chapterSlug: string): string | null {
+  const redirects = content?.redirects;
+  if (!redirects) return null;
+  const seen = new Set<string>();
+  let slug = cleanChapterSlug(chapterSlug);
+  while (Object.hasOwn(redirects, slug) && !seen.has(slug)) {
+    seen.add(slug);
+    slug = redirects[slug]!;
+  }
+  return seen.size ? slug : null;
+}
+
+/**
+ * A release names each lesson by its public slug, so two chapters at one slug cannot both be read:
+ * the reader opens the first and the curriculum lists both. A publish could store such a pair when
+ * a changed lesson was not matched to its earlier version (publishCourseRelease now replaces by
+ * slug). The publisher appends the replacement, so the later entry is the current lesson and the
+ * earlier one is dropped.
+ */
+export function withoutSupersededChapters(modules: ReleaseModule[]): ReleaseModule[] {
+  const current = new Map<string, string>();
+  for (const module of modules) for (const chapter of module.chapters) current.set(cleanChapterSlug(chapter.slug), chapter.id);
+  if (current.size === modules.reduce((sum, module) => sum + module.chapters.length, 0)) return modules;
+  return modules.map(module => ({ ...module,
+    chapters: module.chapters.filter(chapter => current.get(cleanChapterSlug(chapter.slug)) === chapter.id) }));
+}
+
+/** Read a stored release. Always go through this, so every caller sees each lesson once. */
+export function readReleaseContent(raw: unknown): ReleaseContent {
+  const content = raw as ReleaseContent;
+  if (!content?.variants) return content;
+  return { ...content, variants: Object.fromEntries(Object.entries(content.variants).map(([slug, modules]) => [slug, withoutSupersededChapters(modules)])) };
+}
 
 export function variantForRelease(familySlug: string | CourseFamily | null, variantSlug: string | null): string {
   return variantSlug ?? (typeof familySlug === "object" && familySlug ? familySlug : resolveCourseFamily(familySlug))?.defaultVariantSlug ?? "default";
@@ -54,17 +95,31 @@ export async function ensureBaselineRelease(tx: Prisma.TransactionClient, course
   return release;
 }
 
+/** Prefer the learner's variant; fall back when a release dropped it or they hold a retired slug. */
+export function resolveVariantInRelease(
+  content: ReleaseContent,
+  family: CourseFamily | null,
+  variantSlug: string | null
+): string {
+  const requested = variantForRelease(family, variantSlug);
+  const fallback = family?.defaultVariantSlug ?? "default";
+  const variant = content.variants[requested] ? requested
+    : content.variants[fallback] ? fallback
+    : Object.keys(content.variants)[0];
+  if (!variant || !content.variants[variant]) throw new NotFoundError("Course variant not found in this release.");
+  return variant;
+}
+
 export async function releaseForEnrollment(courseId: string, enrollment: { releaseId: string | null; variantSlug: string | null }, familySlug: string | null) {
   const course = await prisma.course.findUniqueOrThrow({ where: { id: courseId }, select: { activeReleaseId: true, variantFamily: true } });
   const releaseId = enrollment.releaseId ?? course.activeReleaseId;
   if (!releaseId) return null;
   const release = await prisma.courseRelease.findFirst({ where: { id: releaseId, courseId } });
   if (!release) throw new NotFoundError("Course release not found.");
-  const content = release.content as unknown as ReleaseContent;
-  const variant = variantForRelease(resolveCourseFamily(familySlug, course.variantFamily), enrollment.variantSlug);
-  const modules = content.variants[variant];
-  if (!modules) throw new NotFoundError("Course variant not found in this release.");
-  return { release, variant, modules };
+  const content = readReleaseContent(release.content);
+  const family = resolveCourseFamily(familySlug, course.variantFamily);
+  const variant = resolveVariantInRelease(content, family, enrollment.variantSlug);
+  return { release, variant, modules: content.variants[variant]! };
 }
 
 /** Build the existing syllabus shape from a pinned release. Chapter and block rows are immutable once referenced. */
@@ -88,9 +143,185 @@ export async function assertEnrollmentChapter(tx: Prisma.TransactionClient, enro
   const id = enrollment.releaseId ?? enrollment.course.activeReleaseId;
   if (!id) return;
   const release = await tx.courseRelease.findFirstOrThrow({ where: { id, courseId: enrollment.courseId } });
-  const variant = variantForRelease(resolveCourseFamily(enrollment.course.familySlug, enrollment.course.variantFamily), enrollment.variantSlug);
-  const content = release.content as unknown as ReleaseContent;
-  const modules = content.variants[variant];
-  if (!modules) throw new NotFoundError("Course variant not found in this release.");
+  const content = readReleaseContent(release.content);
+  const family = resolveCourseFamily(enrollment.course.familySlug, enrollment.course.variantFamily);
+  // Same fallback as releaseForEnrollment so overview/reader and chapter-start never disagree.
+  const variant = resolveVariantInRelease(content, family, enrollment.variantSlug);
+  const modules = content.variants[variant]!;
   if (!modules.some(module => module.chapters.some(chapter => chapter.id === chapterId))) throw new NotFoundError("Chapter is not in this learner's course release.");
+}
+
+/**
+ * Forward-migrates an enrollment's progress and submitted responses from their current release
+ * into a target release, preserving completed chapters, scores, learning logs, and question answers.
+ */
+export async function upgradeEnrollmentToRelease(
+  tx: Prisma.TransactionClient,
+  enrollmentId: string,
+  targetReleaseId: string,
+  options?: { repair?: boolean }
+) {
+  // Serialize concurrent overview/reader requests before checking the pinned release.
+  await tx.$queryRaw`SELECT "id" FROM "Enrollment" WHERE "id" = ${enrollmentId} FOR UPDATE`;
+  const enrollment = await tx.enrollment.findUniqueOrThrow({
+    where: { id: enrollmentId },
+    include: {
+      course: { select: { id: true, slug: true, familySlug: true, variantFamily: true, activeReleaseId: true } },
+      chapterProgress: { include: { chapter: true } },
+    },
+  });
+
+  if (enrollment.releaseId === targetReleaseId && !options?.repair) {
+    return true;
+  }
+
+  const targetRelease = await tx.courseRelease.findUniqueOrThrow({
+    where: { id: targetReleaseId, courseId: enrollment.courseId },
+  });
+
+  const content = readReleaseContent(targetRelease.content);
+  const family = resolveCourseFamily(enrollment.course.familySlug, enrollment.course.variantFamily);
+  const variant = resolveVariantInRelease(content, family, enrollment.variantSlug);
+  const modules = content.variants[variant]!;
+  const targetChapters: ReleaseChapter[] = modules.flatMap((m) => m.chapters);
+
+  const targetById = new Map(targetChapters.map((c) => [c.id, c]));
+  const targetBySlug = new Map(targetChapters.map((c) => [cleanChapterSlug(c.slug), c]));
+  const targetByKey = new Map(targetChapters.filter((c) => c.key).map((c) => [c.key!, c]));
+
+  const counterpart = (chapter: { contentKey: string | null; slug: string }) =>
+    (chapter.contentKey ? targetByKey.get(chapter.contentKey) : null) ?? targetBySlug.get(cleanChapterSlug(chapter.slug));
+
+  // A removed/renamed completed lesson cannot be represented in the target
+  // syllabus. Leave the learner on the working release instead of showing 0%.
+  if (enrollment.chapterProgress.some((progress) =>
+    progress.status === "COMPLETED" && !targetById.has(progress.chapterId) && !counterpart(progress.chapter)
+  )) return false;
+
+  // 1. Forward-migrate ChapterProgress rows
+  for (const cp of enrollment.chapterProgress) {
+    if (targetById.has(cp.chapterId)) continue;
+
+    const targetChapter = counterpart(cp.chapter);
+
+    if (!targetChapter) continue;
+
+    const existingTarget = await tx.chapterProgress.findUnique({
+      where: { enrollmentId_chapterId: { enrollmentId, chapterId: targetChapter.id } },
+    });
+
+    if (existingTarget) {
+      const isCompleted = cp.status === "COMPLETED" || existingTarget.status === "COMPLETED";
+      const newStatus = isCompleted
+        ? "COMPLETED"
+        : cp.status === "IN_PROGRESS" || existingTarget.status === "IN_PROGRESS"
+          ? "IN_PROGRESS"
+          : "NOT_STARTED";
+
+      await tx.chapterProgress.update({
+        where: { id: existingTarget.id },
+        data: {
+          status: newStatus,
+          blocksCompleted: Math.max(cp.blocksCompleted, existingTarget.blocksCompleted),
+          blocksTotal: Math.max(cp.blocksTotal, existingTarget.blocksTotal),
+          score: Math.max(cp.score, existingTarget.score),
+          maxScore: Math.max(cp.maxScore, existingTarget.maxScore),
+          timeSpentSeconds: Math.max(cp.timeSpentSeconds, existingTarget.timeSpentSeconds),
+          startedAt: existingTarget.startedAt ?? cp.startedAt,
+          completedAt: existingTarget.completedAt ?? cp.completedAt,
+          learningLog: existingTarget.learningLog ?? cp.learningLog ?? undefined,
+        },
+      });
+    } else {
+      await tx.chapterProgress.create({
+        data: {
+          enrollmentId,
+          chapterId: targetChapter.id,
+          status: cp.status,
+          blocksCompleted: cp.blocksCompleted,
+          blocksTotal: cp.blocksTotal,
+          score: cp.score,
+          maxScore: cp.maxScore,
+          timeSpentSeconds: cp.timeSpentSeconds,
+          startedAt: cp.startedAt,
+          completedAt: cp.completedAt,
+          learningLog: cp.learningLog ?? undefined,
+        },
+      });
+    }
+  }
+
+  // 2. Copy answers for unchanged blocks; original submissions remain in the old release.
+  const responses = await tx.response.findMany({
+    where: { enrollmentId },
+    include: { block: { include: { chapter: true } }, review: true },
+    orderBy: { submittedAt: "asc" },
+  });
+
+  type ChapterWithBlocks = Awaited<ReturnType<typeof tx.chapter.findUnique<{ where: { id: string }, include: { blocks: { where: { archivedAt: null }, orderBy: { order: "asc" } } } }>>>;
+  const chapterCache = new Map<string, ChapterWithBlocks>();
+  const getChapterWithBlocks = async (chapterId: string) => {
+    if (chapterCache.has(chapterId)) return chapterCache.get(chapterId);
+    const ch = await tx.chapter.findUnique({
+      where: { id: chapterId },
+      include: { blocks: { where: { archivedAt: null }, orderBy: { order: "asc" } } },
+    });
+    chapterCache.set(chapterId, ch);
+    return ch;
+  };
+
+  for (const resp of responses) {
+    if (targetById.has(resp.block.chapterId)) continue;
+
+    const oldChapter = resp.block.chapter;
+    const targetChapterMeta = counterpart(oldChapter);
+
+    if (!targetChapterMeta) continue;
+
+    const targetChapterWithBlocks = await getChapterWithBlocks(targetChapterMeta.id);
+    if (!targetChapterWithBlocks) continue;
+
+    const oldBlock = resp.block;
+    // A changed question must never inherit an answer from a different question.
+    const targetBlock = targetChapterWithBlocks.blocks.find((block) =>
+      block.type === oldBlock.type && block.order === oldBlock.order &&
+      canonical(block.config) === canonical(oldBlock.config)
+    );
+
+    if (!targetBlock) continue;
+
+    const existingTargetResp = await tx.response.findFirst({
+      where: {
+        blockId: targetBlock.id,
+        userId: resp.userId,
+        enrollmentId,
+        attempt: resp.attempt,
+      },
+    });
+
+    if (!existingTargetResp) {
+      await tx.response.create({
+        data: {
+          blockId: targetBlock.id, userId: resp.userId, enrollmentId,
+          attempt: resp.attempt, status: resp.status, payload: resp.payload as Prisma.InputJsonValue,
+          score: resp.score, maxScore: resp.maxScore, isCorrect: resp.isCorrect,
+          durationMs: resp.durationMs, startedAt: resp.startedAt, submittedAt: resp.submittedAt,
+          ...(resp.review ? { review: { create: {
+            reviewerId: resp.review.reviewerId, score: resp.review.score,
+            feedback: resp.review.feedback, verdict: resp.review.verdict,
+            seenAt: resp.review.seenAt, createdAt: resp.review.createdAt,
+          } } } : {}),
+        },
+      });
+    }
+  }
+
+  // 3. Update releaseId and recalculate rollup metrics
+  await tx.enrollment.update({
+    where: { id: enrollmentId },
+    data: { releaseId: targetReleaseId },
+  });
+
+  await recomputeEnrollmentRollup(tx, enrollmentId, { preserveActivity: true });
+  return true;
 }

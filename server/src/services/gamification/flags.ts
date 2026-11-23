@@ -11,5 +11,7 @@ export function gamificationFeatures(): GamificationFeatures {
     career: xp && env.GAMIFICATION_CAREER_LEVELS,
     credits: xp && env.GAMIFICATION_CREDITS,
     leaderboards: xp && env.GAMIFICATION_LEADERBOARDS,
+    leagueTiers: xp && env.GAMIFICATION_LEAGUE_TIERS,
+    recovery: xp && env.GAMIFICATION_RECOVERY,
   };
 }

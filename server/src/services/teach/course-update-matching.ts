@@ -357,6 +357,13 @@ export function matchCourseUpdate(
       ],
     });
   }
+  for (const removal of plan.remove?.lessons ?? []) {
+    const previous = chapters.find(chapter => !chapter.archivedAt && chapter.slug === removal.slug);
+    if (!previous) continue; // An earlier release already removed it.
+    diff.push({ title: previous.title, action: "removed", chapters: [{ title: previous.title, action: "removed", similarity: null,
+      reason: removal.redirectTo ? `Explicit removal from the new release; its address opens ${removal.redirectTo}.`
+        : "Explicit removal from the new release; old releases retain it.", changes: [] }] });
+  }
   for (const key of plan.remove?.moduleKeys ?? []) {
     const previous = modules.find(module => module.contentKey === key);
     diff.push({ title: previous?.title ?? key, action: "removed", chapters: [] });

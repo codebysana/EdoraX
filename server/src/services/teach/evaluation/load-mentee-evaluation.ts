@@ -30,6 +30,7 @@ import type {
   ProjectEvidence,
 } from "../../../shared/api/teach.js";
 import { helpUiCopy as copy } from "../../../shared/lib/help-ui-copy.js";
+import { isConfirmedEnrollment } from "../../enrollment/lifecycle.js";
 import { loadIntegritySummaries } from "../../integrity/review.js";
 import { NotFoundError } from "../../../utils/errors.js";
 
@@ -42,17 +43,14 @@ export async function loadMenteeEvaluation(args: {
 }): Promise<MenteeEvaluation | null> {
   const enrollment = await prisma.enrollment.findUnique({
     where: { id: args.enrollmentId },
-    include: { user: { select: { id: true, name: true, email: true } } },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      payment: { select: { status: true } },
+    },
   });
-  // Each reason has its own message, so a mentor and the API log say exactly why a page cannot open.
-  if (!enrollment)
-    throw new NotFoundError(
-      "This enrollment no longer exists. Reload the mentees list. The learner may have been removed or invited again.",
-    );
-  if (!isEnrollmentScopedToCourse(enrollment, args.course.id))
-    throw new NotFoundError("This enrollment belongs to a different course.");
-  if (!enrollment.userId || !enrollment.user)
-    throw new NotFoundError("This enrollment has no learner account yet.");
+  if (!enrollment || !isEnrollmentScopedToCourse(enrollment, args.course.id)) return null;
+  if (!isConfirmedEnrollment(enrollment)) return null;
+  if (!enrollment.userId || !enrollment.user) return null;
 
   const [
     courseStructure,

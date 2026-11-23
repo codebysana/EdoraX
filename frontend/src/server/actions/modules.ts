@@ -62,6 +62,16 @@ export async function updateCourseIntegrity(input: {
   );
 }
 
+export async function updateCourseCertificateTemplate(input: {
+  courseId: string;
+  template: string;
+}): Promise<CourseBuilderActionResult> {
+  return builderCall(
+    `/api/v1/teach/courses/${encodeURIComponent(input.courseId)}/certificate-template`,
+    { method: "PUT", json: { template: input.template } },
+  );
+}
+
 export async function updateCourseSettings(
   input: { courseId: string } & CourseSettingsInput,
 ): Promise<CourseBuilderActionResult> {

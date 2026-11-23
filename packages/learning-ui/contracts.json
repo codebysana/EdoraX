@@ -19,5 +19,6 @@
   "api/catalog.ts",
   "api/syllabus.ts",
   "domain/enums.ts",
-  "lib/course-tracks.ts"
+  "lib/course-tracks.ts",
+  "html-preview/spec.ts"
 ]

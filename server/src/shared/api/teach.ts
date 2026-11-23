@@ -1,3 +1,5 @@
+import type { CertificateTemplateId } from "../lib/certificates.js";
+import type { CapstoneMentorView } from "../blocks/capstone-check/report.js";
 import type {
   ChapterReaderMode,
   CourseCategory,
@@ -124,6 +126,8 @@ export type CourseBuilderCourse = {
   difficulty: string | null;
   estimatedHours: number | null;
   category: CourseCategory;
+  subcategory: string | null;
+  tags: string[];
   sequential: boolean;
   coverUrl: string | null;
   status: CourseStatus;
@@ -141,10 +145,25 @@ export type CourseBuilderView = {
   looseChapters: CourseBuilderChapter[];
 };
 
-export type CourseSettingsView = Pick<CourseBuilderCourse,
-  "id" | "slug" | "title" | "description" | "projectGoal" | "difficulty" |
-  "estimatedHours" | "category" | "sequential" | "coverUrl" | "status" | "pricingType" |
-  "priceCents" | "currency" | "integrityMode"
+export type CourseSettingsView = Pick<
+  CourseBuilderCourse,
+  | "id"
+  | "slug"
+  | "title"
+  | "description"
+  | "projectGoal"
+  | "difficulty"
+  | "estimatedHours"
+  | "category"
+  | "subcategory"
+  | "tags"
+  | "sequential"
+  | "coverUrl"
+  | "status"
+  | "pricingType"
+  | "priceCents"
+  | "currency"
+  | "integrityMode"
 > & {
   autoGradeOpenQuestions: boolean;
   enrollmentCount: number;
@@ -155,6 +174,8 @@ export type CourseSettingsView = Pick<CourseBuilderCourse,
   familySlug: string | null;
   hasVariants: boolean;
   variantAssignment: VariantAssignment;
+  /** The certificate design this course issues (see CERTIFICATE_TEMPLATES). */
+  certificateTemplate: CertificateTemplateId;
 };
 
 export type CourseDraftPreview = {
@@ -216,6 +237,8 @@ export type CourseSettingsInput = {
   difficulty: string;
   estimatedHours: string;
   category: string;
+  subcategory: string | null;
+  tags: string[];
   sequential: boolean;
   autoGradeOpenQuestions: boolean;
   /** Only sent for a course in a family; omitted leaves it as it is. */
@@ -495,6 +518,12 @@ export type CourseReportView = {
   atRiskDays: number;
   enrollments: ReportEnrollmentRow[];
   chapterReport: ChapterReportView | null;
+  ratings: {
+    average: number | null;
+    count: number;
+    distribution: Array<{ stars: number; count: number }>;
+    recent: Array<{ id: string; rating: number; review: string | null; reviewer: string; createdAt: string }>;
+  };
 };
 
 export type CourseActivityView = {
@@ -553,6 +582,8 @@ export type ReviewDetailView = {
   history: Array<{ id: string; attempt: number; verdict: ReviewVerdict; feedback: string; reviewerName: string | null }>;
   /** Quiz integrity attempts on this chapter by this learner, newest first. */
   integrity: IntegrityAttemptSummary[];
+  /** Capstone checks: the check under review and the learner's other checks on this block, newest first. */
+  capstone: { title: string; current: CapstoneMentorView | null; history: CapstoneMentorView[] } | null;
 };
 
 export type AiReviewDraft = {
@@ -573,6 +604,9 @@ export type AiReviewDraftResult = { draft: AiReviewDraft; model: string };
 export type MentorHelpInboxThread = {
   id: string;
   status: HelpThreadStatus;
+  kind: "QUESTION" | "LESSON_REPORT";
+  category: "ERROR" | "TYPO" | "CONFUSING" | "BROKEN_LINK" | "SUGGESTION" | "OTHER" | null;
+  quote: string | null;
   menteeLabel: string;
   courseTitle: string;
   chapterTitle: string | null;
@@ -604,3 +638,76 @@ export const TEACH_ERROR_CODES = {
   EMAIL_NOT_CONFIGURED: "EMAIL_NOT_CONFIGURED",
   EMAIL_FAILED: "EMAIL_FAILED",
 } as const;
+
+// ---------------------------------------------------------------------------
+// Instructor wallet & withdrawals
+
+export type InstructorWithdrawalStatus = "REQUESTED" | "PAID" | "REJECTED";
+
+export type InstructorWithdrawalItem = {
+  id: string;
+  amountCents: number;
+  currency: string;
+  status: InstructorWithdrawalStatus;
+  note: string;
+  paymentCount: number;
+  requestedAt: string;
+  resolvedAt: string | null;
+};
+
+export type InstructorEarningItem = {
+  id: string;
+  courseTitle: string;
+  learnerLabel: string;
+  fundingSource: string | null;
+  amountCents: number;
+  instructorShareCents: number;
+  currency: string;
+  paidAt: string | null;
+  status: "AVAILABLE" | "PENDING_WITHDRAWAL" | "PAID";
+};
+
+export type InstructorWalletSummary = {
+  withdrawalsEnabled: boolean;
+  totalEarnedCents: number;
+  alreadyPaidCents: number;
+  pendingWithdrawalCents: number;
+  availableBalanceCents: number;
+  currency: string;
+  withdrawals: InstructorWithdrawalItem[];
+  recentEarnings: InstructorEarningItem[];
+};
+
+// ---------------------------------------------------------------------------
+// Instructor promotional discount campaigns
+
+export type InstructorCampaignCourse = {
+  id: string;
+  title: string;
+  slug: string;
+  category: CourseCategory | null;
+  subcategory: string | null;
+  tags: string[];
+  priceCents: number;
+  currency: string;
+};
+
+export type InstructorCampaignItem = {
+  id: string;
+  label: string;
+  code: string | null;
+  scope: string;
+  percentOff: number;
+  maxRedemptions: number;
+  autoApply: boolean;
+  active: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+  participatingCourseIds: string[];
+  eligibleCourseIds: string[];
+};
+
+export type InstructorCampaignsView = {
+  campaigns: InstructorCampaignItem[];
+  courses: InstructorCampaignCourse[];
+};

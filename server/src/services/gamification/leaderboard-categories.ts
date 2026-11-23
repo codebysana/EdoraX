@@ -14,7 +14,17 @@ import { dateToDayKey, dayKeyToDate, localDayKey, shiftDayKey, weekStartKey } fr
 import { gamificationFeatures } from "./flags.js";
 import { currentLeaderboardWeek, loadLeaderboard, loadListableLearners, type ListableLearner } from "./leaderboard.js";
 import { loadLeaguePlacement } from "./league.js";
-import { leagueDemotionZone, leaguePromotionZone, nextLeagueTier, prevLeagueTier } from "../../shared/gamification/leagues.js";
+import {
+  leagueDemotionZone,
+  leaguePromotionZone,
+  leagueWeeklyGoal,
+  legacyLeaguePromotionZone,
+  nextLeagueTier,
+  prevLeagueTier,
+  recoveryQuestComplete,
+  RECOVERY_CHAPTER_TARGET,
+  RECOVERY_XP_TARGET,
+} from "../../shared/gamification/leagues.js";
 import type { LeaderboardView } from "../../shared/api/gamification.js";
 
 // The leaderboard hub: several boards behind one read. The weekly course board delegates to the
@@ -143,24 +153,63 @@ async function globalWeeklyXp(viewerId: string, now: Date): Promise<LeaderboardH
   );
 
   const viewer = rows.find((row) => row.userId === viewerId);
+  const viewerLearner = learners.find((learner) => learner.userId === viewerId);
   const tier = viewer?.tier ?? "BRONZE";
   const tierRows = rows.filter((row) => row.tier === tier);
   const meIndex = Math.max(0, tierRows.findIndex((row) => row.userId === viewerId));
   const rank = tierRows.length > 0 && viewer ? meIndex + 1 : 0;
 
-  const [lastWeekPlacement, bestScore] = await Promise.all([
+  const features = gamificationFeatures();
+  const [lastWeekPlacement, bestScore, recoveryChapters] = await Promise.all([
     loadLeaguePlacement(viewerId, lastWeekKey),
     bestWeeklyXp(viewerId, weekKey),
+    features.recovery && viewerLearner
+      ? prisma.chapterProgress.count({
+          where: {
+            enrollmentId: { in: viewerLearner.enrollmentIds },
+            status: "COMPLETED",
+            completedAt: { gte: weekKey },
+          },
+        })
+      : Promise.resolve(0),
   ]);
 
+  const score = viewer?.score ?? 0;
+  const promotionZone = features.leagueTiers ? leaguePromotionZone(tierRows.length) : legacyLeaguePromotionZone(tierRows.length);
+  const goal = features.leagueTiers ? leagueWeeklyGoal(tier) : 0;
+  const goalMet = goal > 0 && score >= goal;
+  const inPromotionZone = promotionZone > 0 && rank <= promotionZone && Boolean(nextLeagueTier(tier));
+  const promotionPath =
+    nextLeagueTier(tier) === null
+      ? null
+      : inPromotionZone && goalMet
+        ? "BOTH"
+        : inPromotionZone
+          ? "COMPETITIVE"
+          : goalMet
+            ? "TARGET"
+            : null;
   const league: LeagueInfo = {
     tier,
     nextTier: nextLeagueTier(tier),
     prevTier: prevLeagueTier(tier),
     rank,
     groupSize: tierRows.length,
-    promotionZone: leaguePromotionZone(tierRows.length),
-    demotionZone: leagueDemotionZone(tierRows.length),
+    promotionZone,
+    demotionZone: leagueDemotionZone(tierRows.length, promotionZone),
+    goal,
+    goalMet,
+    inPromotionZone,
+    promotionPath,
+    recovery: features.recovery
+      ? {
+          chapters: recoveryChapters,
+          chapterTarget: RECOVERY_CHAPTER_TARGET,
+          xp: score,
+          xpTarget: RECOVERY_XP_TARGET,
+          completed: recoveryQuestComplete(recoveryChapters, score),
+        }
+      : null,
     lastWeek: lastWeekPlacement ? { outcome: lastWeekPlacement.outcome as LeagueOutcome, fromTier: lastWeekPlacement.tier } : null,
   };
 
@@ -191,7 +240,7 @@ async function globalWeeklyXp(viewerId: string, now: Date): Promise<LeaderboardH
     weekStart,
     resetsAt: xpReset(weekStart),
     groupSize: tierRows.length,
-    you: { rank, score: viewer?.score ?? 0, bestScore },
+    you: { rank, score, bestScore },
     entries: hubEntries(tierRows, viewerId),
     lastWeek: lastWeekWinners.length > 0 ? { weekStart: dateToDayKey(lastWeekKey), winners: lastWeekWinners } : null,
     league,

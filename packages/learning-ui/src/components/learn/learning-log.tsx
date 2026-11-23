@@ -109,12 +109,15 @@ function LearningLogQuestion({
   );
 }
 
+/** One shared object, so the default never looks like new data on every render. */
+const NO_INITIAL_ANSWERS: LearningLogAnswers = {};
+
 export function LearningLog({
   title = "Share what you learned",
   instruction,
   questions,
   variant = "default",
-  initialAnswers = {},
+  initialAnswers = NO_INITIAL_ANSWERS,
   onSave,
 }: {
   title?: string;
@@ -207,6 +210,17 @@ export function LearningLog({
   const total = normalizedQuestions.length;
   const progress = total > 0 ? (answeredCount / total) * 100 : 0;
   const allAnswered = total > 0 && answeredCount === total;
+
+  const announcedCompleteRef = useRef(false);
+  useEffect(() => {
+    if (!allAnswered) {
+      announcedCompleteRef.current = false;
+      return;
+    }
+    if (saveStatus !== "saved" || announcedCompleteRef.current) return;
+    announcedCompleteRef.current = true;
+    window.dispatchEvent(new CustomEvent("buildment:reflection-complete"));
+  }, [allAnswered, saveStatus]);
 
   const saveLabel =
     saveStatus === "saving"
@@ -322,7 +336,7 @@ export function LearningLog({
       </ol>
 
       {allAnswered ? (
-        <div className="border-t border-ok bg-ok-soft px-5 py-3.5">
+        <div className="border-t border-ok bg-ok-soft px-5 py-3.5" data-learning-log-complete>
           <p className="flex items-center gap-2 text-sm font-medium text-ok">
             <CheckCircle2 className="size-4 shrink-0 text-ok" />
             Reflection saved — you have captured what you learned in this chapter.

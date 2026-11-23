@@ -16,7 +16,10 @@ import { Progress, ProgressLabel } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { helpUiCopy } from "@/shared/lib/help-ui-copy";
 import { formatStudyAmount } from "@/lib/format-study-duration";
+import { CourseCertificateLink } from "@/components/learn/course-certificate-link";
 import { WeeklyGoalEditor } from "@/components/learn/dashboard/weekly-goal-editor";
+import { WeeklyQuests } from "@/components/learn/dashboard/weekly-quests";
+import { LeagueGoalCard } from "@/components/learn/dashboard/league-goal-card";
 import { CourseStageLine, LearningMomentum } from "@/components/learn/dashboard/gamification";
 import { showsGameElements } from "@/lib/gamification";
 import { MascotStill } from "@/components/mascot/mascot-tip";
@@ -328,7 +331,7 @@ function CourseListPreview({ courses }: { courses: DashboardCourse[] }) {
     <section aria-labelledby="courses-preview-heading" className="min-w-0 border-t border-border pt-8 sm:pt-10">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 id="courses-preview-heading" className="text-lg font-semibold tracking-tight">My courses</h2>
+          <h2 id="courses-preview-heading" className="text-lg font-semibold tracking-tight">My learning</h2>
           <p className="mt-1 text-sm text-muted-foreground">Pick up where you left off.</p>
         </div>
         <Link
@@ -419,6 +422,7 @@ function CourseCard({ course, featured }: { course: DashboardCourse; featured: b
           >
             {course.actionLabel}
           </Link>
+          {course.state === "COMPLETED" ? <CourseCertificateLink courseSlug={course.slug} /> : null}
           <Link href={course.overviewHref} className="text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Course overview</Link>
         </div>
       </div>
@@ -430,7 +434,7 @@ export function MenteeCourseList({ courses, showHeading = true, primaryCourseId 
   const orderedCourses = [...courses].sort((a, b) => Number(b.id === primaryCourseId) - Number(a.id === primaryCourseId));
   return (
     <section aria-labelledby={showHeading ? "courses-heading" : undefined}>
-      {showHeading ? <div><h2 id="courses-heading" className="text-lg font-semibold tracking-tight">My courses</h2><p className="mt-1 text-sm text-muted-foreground">All assigned courses and their next available steps.</p></div> : null}
+      {showHeading ? <div><h2 id="courses-heading" className="text-lg font-semibold tracking-tight">My learning</h2><p className="mt-1 text-sm text-muted-foreground">All assigned courses and their next available steps.</p></div> : null}
       <div className={cn("grid grid-cols-1 gap-4 lg:grid-cols-2", showHeading && "mt-4")}>
         {orderedCourses.map((course) => <CourseCard key={course.id} course={course} featured={course.id === primaryCourseId && course.state !== "COMPLETED"} />)}
       </div>
@@ -488,6 +492,8 @@ export function MenteeDashboard({ model }: { model: MenteeDashboardViewModel }) 
         <div className="mt-8"><EmptyDashboard name={model.learner.name} /></div>
       ) : (
         <div className="mt-6 space-y-6">
+          <WeeklyQuests />
+          <LeagueGoalCard view={model.leaderboard} />
           {model.activity.runningSession ? <ResumeBanner session={model.activity.runningSession} /> : null}
           <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
             {model.primaryCourse ? <ContinueLearning course={model.primaryCourse} /> : null}

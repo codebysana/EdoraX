@@ -9,5 +9,6 @@ import { remarkChecklist } from "./remark-checklist.js";
 import { remarkLearningLog } from "./remark-learning-log.js";
 import { remarkDiagram } from "./remark-diagram.js";
 import { remarkMermaid } from "./remark-mermaid.js";
+import { remarkHtmlPreview } from "./remark-html-preview.js";
 
-export const readerRemarkPlugins = [remarkChecklist, remarkLearningLog, remarkDiagram, remarkMermaid];
+export const readerRemarkPlugins = [remarkChecklist, remarkLearningLog, remarkHtmlPreview, remarkDiagram, remarkMermaid];

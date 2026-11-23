@@ -8,8 +8,13 @@ import * as courseRequests from "../services/admin/course-requests.js";
 import * as users from "../services/admin/users.js";
 import * as mfa from "../services/admin/mfa.js";
 import * as courses from "../services/admin/courses.js";
+import * as courseAccess from "../services/admin/course-access.js";
 import * as profile from "../services/admin/profile.js";
 import * as audit from "../services/admin/audit.js";
+import * as desktopUpdates from "../services/admin/desktop-updates.js";
+import * as refundPolicySvc from "../services/admin/refund-policy.js";
+import * as appSettingsSvc from "../services/admin/app-settings.js";
+import * as certificateSettingsSvc from "../services/admin/certificate-settings.js";
 import * as appActivity from "../services/activity/reports.js";
 import type { AppActivityUsersQuery } from "../validations/activity.js";
 import type {
@@ -21,6 +26,7 @@ import type {
   BulkIdsBody,
   BulkSuspendBody,
   CourseStatusBody,
+  DesktopUpdatesBody,
   CreateOrganizationBody,
   GrantAdminBody,
   GrantInstructorBody,
@@ -30,6 +36,7 @@ import type {
   ListUsersQuery,
   MetricsQuery,
   PageQuery,
+  RefundPolicyBody,
   SuspendUserBody,
   TotpCodeBody,
 } from "../validations/admin.js";
@@ -66,6 +73,30 @@ export async function getMetrics(req: Request, res: Response) {
 // GET /api/v1/admin/courses
 export async function listCourses(req: Request, res: Response) {
   ok(res, await overview.listCourses(req.query as ListCoursesQuery));
+}
+
+// GET /api/v1/admin/courses/:courseId/org-access — organizations with free access to the course
+export async function listCourseOrgAccess(req: Request, res: Response) {
+  ok(res, await courseAccess.listCourseOrganizationAccess(param(req, "courseId")));
+}
+
+// POST /api/v1/admin/courses/:courseId/org-access — grant free access to an organization
+export async function grantCourseOrgAccess(req: Request, res: Response) {
+  const { organizationId } = req.body as { organizationId: string };
+  await courseAccess.grantCourseOrganizationAccess(req.user!, param(req, "courseId"), organizationId);
+  noContent(res);
+}
+
+// DELETE /api/v1/admin/courses/:courseId/org-access/:organizationId — revoke free access
+export async function revokeCourseOrgAccess(req: Request, res: Response) {
+  await courseAccess.revokeCourseOrganizationAccess(req.user!, param(req, "courseId"), param(req, "organizationId"));
+  noContent(res);
+}
+
+// POST /api/v1/admin/organizations/:orgId/free-access — bulk grant or revoke free access
+export async function setOrgCoursesFreeAccess(req: Request, res: Response) {
+  const { courseIds, freeForOrganization } = req.body as { courseIds: string[]; freeForOrganization: boolean };
+  ok(res, await courseAccess.setCoursesFreeForOrganization(req.user!, param(req, "orgId"), courseIds, freeForOrganization));
 }
 
 // POST /api/v1/admin/courses/:courseId/status — publish / unpublish / archive
@@ -119,6 +150,13 @@ export async function bulkRejectCourseRequests(req: Request, res: Response) {
   ok(res, await courseRequests.bulkRejectCourseRequests(req.user!, ids));
 }
 
+// PATCH /api/v1/admin/organizations/:orgId/allocations/:courseId/allowed
+export async function setAllocationAllowed(req: Request, res: Response) {
+  const { enabled } = req.body as { enabled: boolean };
+  await organizations.setAllocationAllowed(req.user!, param(req, "orgId"), param(req, "courseId"), enabled);
+  noContent(res);
+}
+
 // PATCH /api/v1/admin/organizations/:orgId/allocations/:courseId/leaderboard
 export async function setAllocationLeaderboard(req: Request, res: Response) {
   const { enabled } = req.body as { enabled: boolean };
@@ -154,9 +192,9 @@ export async function createCouponPool(req: Request, res: Response) {
 
 // PATCH /api/v1/admin/organizations/:orgId/coupons/:poolId
 export async function setCouponPoolActive(req: Request, res: Response) {
-  const { active } = req.body as { active: boolean };
-  const { setCouponPoolActive: setActive } = await import("../services/coupons/pools.js");
-  await setActive(param(req, "orgId"), param(req, "poolId"), active);
+  const body = req.body as { active?: boolean; maxRedemptions?: number };
+  const { updateCouponPool } = await import("../services/coupons/pools.js");
+  await updateCouponPool(param(req, "orgId"), param(req, "poolId"), body);
   noContent(res);
 }
 
@@ -233,6 +271,25 @@ export async function reinstateUser(req: Request, res: Response) {
 // POST /api/v1/admin/users/:userId/reset-mfa
 export async function resetUserMfa(req: Request, res: Response) {
   await mfa.resetUserTotp(req.user!, param(req, "userId"));
+  noContent(res);
+}
+
+// POST /api/v1/admin/users/:userId/enroll
+export async function enrollUser(req: Request, res: Response) {
+  const { courseId } = req.body as { courseId: string };
+  const result = await users.enrollUser(req.user!, param(req, "userId"), courseId);
+  created(res, result);
+}
+
+// DELETE /api/v1/admin/users/:userId/enrollments/:enrollmentId
+export async function removeUserEnrollment(req: Request, res: Response) {
+  await users.removeUserEnrollment(req.user!, param(req, "enrollmentId"), param(req, "userId"));
+  noContent(res);
+}
+
+// DELETE /api/v1/admin/enrollments/:enrollmentId
+export async function removeEnrollment(req: Request, res: Response) {
+  await users.removeUserEnrollment(req.user!, param(req, "enrollmentId"));
   noContent(res);
 }
 
@@ -332,4 +389,34 @@ export async function getAppActivity(req: Request, res: Response) {
 // GET /api/v1/admin/app-activity/users?days=7&limit=50&offset=0&inactiveForDays=&userId=
 export async function listAppActivityUsers(req: Request, res: Response) {
   ok(res, await appActivity.listAppActivityUsers(req.query as unknown as AppActivityUsersQuery));
+}
+
+// GET /api/v1/admin/desktop-updates — forced-update policy for darwin, win32 and linux
+export async function listDesktopUpdates(_req: Request, res: Response) {
+  ok(res, await desktopUpdates.listDesktopUpdatePolicies());
+}
+
+// PUT /api/v1/admin/desktop-updates — apply fields to the listed platforms in one save
+export async function saveDesktopUpdates(req: Request, res: Response) {
+  const { platforms, fields } = req.body as DesktopUpdatesBody;
+  ok(res, await desktopUpdates.saveDesktopUpdatePolicies({ id: req.user!.id, email: req.user!.email }, platforms, fields));
+}
+
+// GET /api/v1/admin/settings/refund-policy
+export async function getRefundPolicy(_req: Request, res: Response) {
+  ok(res, await refundPolicySvc.getRefundPolicyAdmin());
+}
+
+// PUT /api/v1/admin/settings/refund-policy
+export async function saveRefundPolicy(req: Request, res: Response) {
+  ok(res, await refundPolicySvc.updateRefundPolicyAdmin(req.body as RefundPolicyBody, { id: req.user!.id, email: req.user!.email }));
+}
+
+// GET /api/v1/admin/settings/app
+export async function getAppSettings(_req: Request, res: Response) {
+  ok(res, await appSettingsSvc.getAppSettingsAdmin());
+}
+
+export async function savePlatformCertificateSettings(req: Request, res: Response) {
+  ok(res, await certificateSettingsSvc.savePlatformCertificateSettings(req.body));
 }

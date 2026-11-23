@@ -1,0 +1,128 @@
+name: Desktop release
+
+# Builds the Edorax desktop app for Windows, macOS and Linux.
+#
+# Pull requests build all three desktop targets without publishing a release.
+# Merging desktop changes into main builds them again and publishes a pre-release.
+# The release tag is created from the merged main commit using desktop/package.json.
+#
+# Or by hand: Actions tab -> "Desktop release" -> "Run workflow", then pick the branch.
+#   publish = false (default)  build only; the installers are kept as workflow artifacts.
+#   publish = true             tag the selected commit and attach the installers to a pre-release.
+#
+# The app carries no labs. It downloads them from the server after sign-in, so this workflow needs no secrets.
+# The installers are not code signed yet: Windows SmartScreen and macOS Gatekeeper will warn on first open.
+
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "server/src/shared/**"
+      - ".github/workflows/desktop-release.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a GitHub pre-release (tag desktop-v<version>) after building"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "server/src/shared/**"
+      - ".github/workflows/desktop-release.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  make:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux, os: ubuntu-latest }
+          - { name: Windows, os: windows-latest }
+          - { name: macOS, os: macos-latest }
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      # The .deb and .rpm makers need these tools on the Linux runner.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fakeroot rpm
+        working-directory: .
+      - run: pnpm install --frozen-lockfile
+      # The desktop build imports shared code from server/src/shared, which needs the server's packages.
+      - run: pnpm --dir ../server install --frozen-lockfile
+      - run: pnpm ide:setup
+      - run: pnpm make
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edorax-desktop-${{ matrix.name }}
+          path: desktop/out/make/**
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: make
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Work out the tag from desktop/package.json
+        id: tag
+        run: |
+          version=$(node -p "require('./desktop/package.json').version")
+          tag="desktop-v${version}"
+          # Reuse an existing version tag only when its commit is included in this release commit.
+          # Otherwise create the tag at the merged main commit.
+          if git show-ref --tags --verify --quiet "refs/tags/${tag}"; then
+            tagged_commit=$(git rev-list -n1 "${tag}")
+            if ! git merge-base --is-ancestor "${tagged_commit}" "${GITHUB_SHA}"; then
+              echo "::error::Tag ${tag} points to a commit outside this release history. Bump the version in desktop/package.json first."
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "${tag}" "${GITHUB_SHA}"
+            git push origin "${tag}"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List what will be attached
+        run: find dist -type f | sort
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Edorax desktop ${{ steps.tag.outputs.tag }}
+          # A first release stays a pre-release until it has been tried on all three systems.
+          prerelease: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/**/*.exe
+            dist/**/*.zip
+            dist/**/*.deb
+            dist/**/*.rpm

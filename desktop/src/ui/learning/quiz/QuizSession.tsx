@@ -1,11 +1,12 @@
-import { playFeedback } from "../../../lib/sound-feedback";
-import { useEffect, useRef, useState } from "react";
-import type { QuizChapterState } from "../../../../../server/src/shared/api/blocks";
-import { useQuizIntegrity } from "@buildment/learning-ui/lib/integrity/use-quiz-integrity";
-import { integrityTransport } from "./integrity-transport";
-import { IntegrityNotice } from "./IntegrityNotice";
-import { Exercise } from "../Exercise";
-import { QUIZ_TIME_UP_DONE_EVENT, QUIZ_TIME_UP_EVENT } from "./secure/quiz-timer";
+import { playFeedback } from '../../../lib/sound-feedback';
+import { useEffect, useRef, useState } from 'react';
+import type { QuizChapterState } from '../../../../../server/src/shared/api/blocks';
+import { useQuizIntegrity } from '@buildment/learning-ui/lib/integrity/use-quiz-integrity';
+import { integrityTransport } from './integrity-transport';
+import { IntegrityNotice } from './IntegrityNotice';
+import { useDotVoice } from '../../mascot/DotVoice';
+import { Exercise } from '../Exercise';
+import { QUIZ_TIME_UP_DONE_EVENT, QUIZ_TIME_UP_EVENT } from './secure/quiz-timer';
 
 export function QuizSession({
   chapterId,
@@ -13,6 +14,7 @@ export function QuizSession({
   complete,
   onSaved,
   gated = false,
+  onExit,
 }: {
   chapterId: string;
   state: QuizChapterState;
@@ -20,7 +22,9 @@ export function QuizSession({
   onSaved: () => void;
   /** True when the protected-mode gate already showed the rules. */
   gated?: boolean;
+  onExit: () => void;
 }) {
+  const [screens, setScreens] = useState(1);
   const steps = state.steps.length
     ? state.steps
     : state.blockIds.map((id) => ({ id, type: "QUIZ" as const }));
@@ -74,6 +78,30 @@ export function QuizSession({
         void document.exitFullscreen().catch(() => undefined);
     };
   }, []);
+  const { track: trackDot, setQuiet } = useDotVoice();
+  useEffect(() => {
+    // The mascot stays quiet during any quiz.
+    setQuiet(true);
+    // Inside the gate, the gate's own lockdown owns the window. Only a quiz shown on its own locks it
+    // here: full screen, on top, no screenshots, copy blocked, and one screen only.
+    if (gated) return () => setQuiet(false);
+    void window.buildment.quizLockdown(true).then((result) => setScreens(result.screens));
+    const unsubscribe = window.buildment.onQuizScreens((result) => setScreens(result.screens));
+    void document.documentElement.requestFullscreen?.().catch(() => undefined);
+    const previous = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+    return () => {
+      setQuiet(false);
+      unsubscribe();
+      document.body.style.userSelect = previous;
+      void window.buildment.quizLockdown(false);
+    };
+  }, [gated]);
+  async function exitQuiz() {
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => undefined);
+    await window.buildment.quizLockdown(false);
+    onExit();
+  }
   // At time-up the gate asks for a save. The ref keeps the latest answers for the listener.
   const submitRef = useRef(submit);
   useEffect(() => {
@@ -129,6 +157,7 @@ export function QuizSession({
         setError(result.message);
         return;
       }
+      void trackDot({ type: 'quiz_submitted', chapterId });
       const data = result.data as {
         score: number;
         maxScore: number;
@@ -207,6 +236,30 @@ export function QuizSession({
           style={{ width: ((position + 1) / visible.length) * 100 + "%" }}
         />
       </div>
+      {!gated && screens > 1 && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="quiz-screens-title"
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-background/95 p-6 text-center"
+        >
+          <div className="max-w-md rounded-2xl border border-border bg-card p-7">
+            <h2 id="quiz-screens-title" className="text-2xl font-semibold">Turn off your other screens</h2>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              Quizzes run on one screen only. Disconnect or turn off the other displays to continue.
+            </p>
+          </div>
+        </div>
+      )}
+      {!gated && (
+        <button
+          type="button"
+          onClick={() => void exitQuiz()}
+          className="fixed right-4 top-4 z-[75] rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-muted"
+        >
+          Exit quiz
+        </button>
+      )}
       <IntegrityNotice integrity={integrity} autoStart={gated} />
       {individualCount > 0 && (
         <p className="text-sm leading-6 text-muted-foreground">
@@ -234,7 +287,7 @@ export function QuizSession({
       {score && (
         <div
           role="status"
-          className="my-5 rounded-xl border border-border bg-ok-soft/40 p-5"
+          className="my-5 rounded-xl border border-border bg-secondary/40 p-5"
         >
           <p className="text-lg font-semibold">
             Quiz score: {score.score} / {score.maxScore}

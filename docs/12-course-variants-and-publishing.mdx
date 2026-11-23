@@ -89,6 +89,21 @@ module sequence, including every variant-only module. `omitLessonKeys` removes
 inherited lessons from retained shared modules. New graded work gets separate
 progress. Keep keys stable and review the effect on every variant before approval.
 
+A course without lesson keys removes a lesson by its public address, the last part of
+its reader link:
+
+```yaml
+remove:
+  lessons:
+    - slug: 39-5-the-old-summary
+      redirectTo: 39-5-part-1-the-bucket
+```
+
+`redirectTo` is optional. With it, an old link to the removed lesson opens the named
+lesson instead of a "not found" page. The target must be in the course after the publish.
+Leave the entry in `course.yaml`: a lesson that an earlier release already removed is
+skipped, and the redirect is kept. Leaving a lesson file out of the package never removes it.
+
 The older `multi-vendor-marketplace` source folder now has a manifest with stable
 keys for all 385 lessons. Its `repositoryTargetSlug` points to the existing
 `freshmarket-multi-vendor-marketplace-v3` database course. The publisher requires

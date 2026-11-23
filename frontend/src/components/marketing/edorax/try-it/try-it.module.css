@@ -1,0 +1,85 @@
+/* Styles for the quiz and drag steps shown inside the hero's lab window. */
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.stepBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.answer:hover {
+  border-color: #2434e0 !important;
+}
+
+.primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 22px;
+  border: 0;
+  font-size: 16px;
+  font-weight: 700;
+  background: #2434e0;
+  color: #f6f7fb;
+}
+
+.primary:hover {
+  background: #1c29b8;
+}
+
+@media (pointer: coarse) {
+  .keyboardTip {
+    display: none;
+  }
+}
+
+.orderList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.orderBlock {
+  width: 100%;
+  min-height: 50px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  font-size: 16px;
+  touch-action: none;
+  user-select: none;
+  transition: box-shadow 120ms ease;
+}
+
+.orderBlock:disabled {
+  opacity: 1;
+}
+
+@media (max-width: 520px) {
+  .stepTitle {
+    font-size: 18px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orderBlock {
+    transition: none;
+  }
+}

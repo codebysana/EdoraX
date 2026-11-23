@@ -65,4 +65,13 @@ describe("course.yaml family", () => {
     expect(CourseManifestSchema.safeParse({ ...manifest, publication: "update", modules: [],
       remove: { moduleKeys: [], lessonKeys: ["old-lesson", "old-lesson"] } }).success).toBe(false);
   });
+
+  it("accepts a removal by lesson address and rejects a repeated address or a redirect to a removed lesson", () => {
+    const removal = (lessons: { slug: string; redirectTo?: string }[]) =>
+      CourseManifestSchema.safeParse({ ...manifest, publication: "update", modules: [], remove: { lessons } }).success;
+    expect(removal([{ slug: "3-5-old-summary", redirectTo: "3-5-part-1" }, { slug: "3-6-old-recap" }])).toBe(true);
+    expect(removal([{ slug: "3-5-old-summary" }, { slug: "3-5-old-summary" }])).toBe(false);
+    expect(removal([{ slug: "3-5-old-summary", redirectTo: "3-6-old-recap" }, { slug: "3-6-old-recap" }])).toBe(false);
+    expect(removal([{ slug: "3.5 Old Summary" }])).toBe(false);
+  });
 });

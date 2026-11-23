@@ -113,7 +113,7 @@ function LastWeekWinners({ winners, metricLabel }: { winners: LeaderboardHubEntr
             </span>
             <span className={cn("mt-3 w-full truncate text-sm", winner.isYou ? "font-semibold" : "font-medium")}>
               <span className="sr-only">Place {winner.rank}: </span>
-              {winner.isYou ? "You" : winner.name}
+              {winner.isYou ? (winner.name ? `${winner.name} (You)` : "You") : winner.name}
             </span>
             <span className="mt-1 text-sm tabular-nums text-muted-foreground">
               {formatScore(winner.score, metricLabel)}
@@ -232,13 +232,13 @@ export function LeaderboardPage({
             <p className="text-sm font-medium text-muted-foreground">Competition</p>
             <h1 className="mt-1 text-[32px] leading-tight tracking-[-0.035em] sm:text-[40px]">Leaderboard</h1>
             <p className="mt-2 max-w-xl text-base text-muted-foreground">
-              Weekly leagues with promotion and demotion, plus all-time, speed and streak boards. Boards reset every Monday.
+              Weekly leagues with two promotion paths, plus all-time, speed and streak boards. Boards reset every Monday.
             </p>
           </div>
           <InfoTip label="About leaderboards" className="mt-1 shrink-0">
             <p>Four boards: weekly XP (your league, or one board per course), all-time XP, speed (chapters this week) and streak.</p>
             <p className="mt-2">Only learners who join appear, shown by first name and last initial. Weekly boards reset every Monday at 00:00 UTC.</p>
-            <p className="mt-2">Leagues: each week the top 10% of your tier promote and the bottom 20% demote.</p>
+            <p className="mt-2">Leagues: reach your weekly goal or finish in the top 10% to promote. The bottom 20% can demote, with recovery protection available.</p>
           </InfoTip>
         </div>
 

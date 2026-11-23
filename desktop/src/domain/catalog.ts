@@ -13,25 +13,50 @@ export type Result<T> =
   | { ok: false; message: string; code: string };
 export type CatalogResult =
   | { ok: true; courses: Course[] }
-  | { ok: false; message: string };
+  | { ok: false; message: string; code?: string };
 export type EnrollmentResult = { lifecycle: 'ACTIVE' | 'PAYMENT_REQUIRED' };
 export interface DesktopAPI {
   ide?: IDEAPI;
-  labs: import("./labs").LabsAPI;
+  labs: import('./labs').LabsAPI;
+  shellLabs: import('./shell-labs').ShellLabsAPI;
+  update: import('./app-update').AppUpdateAPI;
   secure: SecureAPI;
   readonly platform?: string;
+  offline: {
+    status(slug: string): Promise<{ available: boolean; downloadedAt: string | null; chapters: number; pending: number }>;
+    download(slug: string): Promise<Result<{ chapters: number; locked: number }>>;
+    remove(slug: string): Promise<void>;
+    sync(): Promise<{ pending: number; message: string | null }>;
+    onStatus(listener: (status: { pending: number; message: string | null; code: string | null; synced: number; dropped: string[] }) => void): () => void;
+  };
   webOrigin(): Promise<string>;
   integrityRequest(
     path: string,
     method: string,
     body?: unknown,
   ): Promise<Result<unknown>>;
-  learning: ReturnType<typeof import("../api/learning").createLearningClient>;
+  learning: Omit<ReturnType<typeof import('../api/learning').createLearningClient>, 'downloadChapter'>;
   startLearning(slug: string): Promise<Result<{ href: string | null }>>;
   enroll(courseId: string): Promise<Result<EnrollmentResult>>;
   listCourses(): Promise<CatalogResult>;
+  audiobooks: {
+    library(): Promise<import('./audiobooks').AudiobookLibraryResult>;
+    download(slug: string): Promise<{ ok: boolean; message?: string }>;
+    remove(slug: string): Promise<{ ok: boolean; message?: string }>;
+  };
   courseDetail(slug: string): Promise<Result<CourseDetail>>;
   learnerProfile(): Promise<Result<LearnerProfile>>;
+  home(): Promise<Result<import('./home').HomeSummary>>;
+  progress(): Promise<Result<import('./progress').ProgressData>>;
+  leaderboard: {
+    context(): Promise<Result<import('./leaderboard').LeaderboardContext>>;
+    hub(selection: import('./leaderboard').LeaderboardSelection): Promise<Result<import('./leaderboard').LeaderboardHubView>>;
+    setOptIn(optIn: boolean): Promise<Result<null>>;
+  };
+  remote: { request(path: string, method: string, body?: unknown): Promise<Result<unknown>> };
+  openWeb(path: string): Promise<void>;
+  quizLockdown(active: boolean): Promise<{ screens: number }>;
+  onQuizScreens(listener: (state: { screens: number }) => void): () => void;
   signIn(): Promise<Result<{ signedIn: true }>>;
   authStatus(): Promise<Result<{ signedIn: boolean }>>;
   cancelSignIn(): Promise<void>;

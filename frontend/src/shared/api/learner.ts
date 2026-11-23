@@ -2,7 +2,7 @@
 import type { EnrollStatus, HelpThreadStatus, ProgressStatus, BlockType } from "../domain/enums";
 import type { InstructorAccessView } from "../lib/instructor-access";
 import type { LearnerHabit, StreakMilestone } from "../lib/streak";
-import type { GamificationSummary } from "./gamification";
+import type { GamificationSummary, LeaderboardHubView } from "./gamification";
 
 // Wire contract for /api/v1/learner. Dates travel as ISO strings.
 
@@ -109,6 +109,7 @@ export type MenteeDashboardViewModel = {
   recentEvents: DashboardEvent[];
   habit: LearnerHabit;
   gamification: GamificationSummary;
+  leaderboard: LeaderboardHubView | null;
 };
 
 export type LearnerProgressModule = {
@@ -156,6 +157,12 @@ export type LearnerProgressView = {
     maxScore: number;
     weekSeconds: number;
     pendingReviews: number;
+    /** Aggregated daily study seconds for the selected calendar year (for the activity grid). */
+    yearActivity: DashboardDay[];
+    /** The calendar year the grid is showing. */
+    year: number;
+    /** Years that have any recorded activity (for the year switcher). */
+    activityYears: number[];
   };
 };
 
@@ -178,6 +185,23 @@ export type LearnerProfile = {
 };
 
 export type ProfileUpdateInput = { name: string; timezone: string; skills: string[] };
+
+/** GET /api/v1/learner/streak-popup — once-per-local-day streak celebration. */
+export type StreakPopupDayView = {
+  day: string;
+  weekday: string;
+  status: "completed" | "missed" | "today";
+  seconds: number;
+};
+
+export type StreakPopupView = {
+  show: boolean;
+  streakCount: number;
+  todayActive: boolean;
+  today: string;
+  week: StreakPopupDayView[];
+  seenOn: string | null;
+};
 
 export const INSTRUCTOR_ACCESS_ERROR_CODES = {
   ALREADY_INSTRUCTOR: "ALREADY_INSTRUCTOR",

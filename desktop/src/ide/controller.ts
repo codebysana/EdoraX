@@ -18,6 +18,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { dialog } from 'electron';
 import { TheiaRuntime } from './runtime';
+import { CourseFolders, validateCourse } from './course-folders';
 
 const execFileAsync = promisify(execFile);
 const OPEN_WITH_APPS: Record<string, { name: string; label: string }> = {
@@ -85,6 +86,7 @@ async function openFolderWith(appId: string, folder: string) {
 export function installIDE(
   getWindow: () => BrowserWindow | null,
   requireRenderer: (event: IpcMainInvokeEvent) => void,
+  folders: CourseFolders,
 ) {
   const directory = app.isPackaged
     ? path.join(process.resourcesPath, 'ide')
@@ -129,32 +131,63 @@ export function installIDE(
     view.setVisible(false);
     viewVisible = false;
   };
-  ipcMain.handle('ide:status', (event) => {
+  let activeCourse: string | null = null;
+  let switching: Promise<unknown> = Promise.resolve();
+  function sequential<T>(action: () => Promise<T>): Promise<T> {
+    const task = switching.then(action);
+    switching = task.catch(() => {});
+    return task;
+  }
+  ipcMain.handle('ide:status', (event, course) => {
     requireRenderer(event);
-    return runtime.status();
+    validateCourse(course);
+    return activeCourse === course ? runtime.status() : null;
   });
-  ipcMain.handle('ide:open', async (event, createProject) => {
+  ipcMain.handle('ide:resume', (event, course) => {
     requireRenderer(event);
+    validateCourse(course);
+    return sequential(async () => {
+      if (activeCourse === course && runtime.status() && view)
+        return runtime.status();
+      hide();
+      await stop();
+      activeCourse = null;
+      const folder = await folders.get(course);
+      return folder ? launch(course, folder) : null;
+    });
+  });
+  ipcMain.handle('ide:open', (event, createProject, course) => {
+    requireRenderer(event);
+    validateCourse(course);
+    return sequential(async () => {
+      const window = getWindow();
+      if (!window) throw new Error('The Edorax window is closed.');
+      let folder: string;
+      if (createProject === true) {
+        const choice = await dialog.showSaveDialog(window, {
+          title: 'Create local project',
+          buttonLabel: 'Create project',
+          defaultPath: path.join(app.getPath('documents'), 'edorax-project'),
+        });
+        if (choice.canceled || !choice.filePath) return null;
+        await mkdir(choice.filePath);
+        folder = await realpath(choice.filePath);
+      } else {
+        const choice = await dialog.showOpenDialog(window, {
+          title: 'Open local project',
+          properties: ['openDirectory', 'createDirectory'],
+        });
+        if (choice.canceled || !choice.filePaths[0]) return null;
+        folder = await realpath(choice.filePaths[0]);
+      }
+      await folders.set(course, folder);
+      return launch(course, folder);
+    });
+  });
+  async function launch(course: string, folder: string) {
     const window = getWindow();
     if (!window) throw new Error('The Edorax window is closed.');
-    let folder: string;
-    if (createProject === true) {
-      const choice = await dialog.showSaveDialog(window, {
-        title: 'Create local project',
-        buttonLabel: 'Create project',
-        defaultPath: path.join(app.getPath('documents'), 'edorax-project'),
-      });
-      if (choice.canceled || !choice.filePath) return null;
-      await mkdir(choice.filePath);
-      folder = await realpath(choice.filePath);
-    } else {
-      const choice = await dialog.showOpenDialog(window, {
-        title: 'Open local project',
-        properties: ['openDirectory', 'createDirectory'],
-      });
-      if (choice.canceled || !choice.filePaths[0]) return null;
-      folder = await realpath(choice.filePaths[0]);
-    }
+    activeCourse = null;
     closeView();
     const current = await runtime.start(
       folder,
@@ -189,28 +222,42 @@ export function installIDE(
     view.webContents.on('render-process-gone', () => {
       void stop();
     });
-    await view.webContents.loadURL(current.url);
+    await view.webContents.loadURL(
+      `${current.url}#${encodeURI(current.folder)}`,
+    );
+    activeCourse = course;
     return current;
-  });
-  ipcMain.handle('ide:bounds', (event, bounds) => {
+  }
+  ipcMain.handle('ide:bounds', (event, bounds, course) => {
     requireRenderer(event);
     if (!view) return;
-    if (!bounds) {
-      if (viewVisible) {
-        view.setVisible(false);
-        viewVisible = false;
-      }
+    // Hiding never depends on the course or the tracked state: any request without a position for the
+    // active course hides the IDE view, so it cannot stay on screen after the learner closes it.
+    if (!bounds || activeCourse !== course) {
+      // Shrink the view as well as hiding it, so it cannot cover the lesson even if hiding fails.
+      view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+      view.setVisible(false);
+      viewVisible = false;
       return;
     }
-    const { x, y, width, height } = bounds;
+    const { x: cssX, y: cssY, width: cssWidth, height: cssHeight } = bounds;
     if (
-      ![x, y, width, height].every(
+      ![cssX, cssY, cssWidth, cssHeight].every(
         (value) => typeof value === 'number' && Number.isFinite(value),
       )
     )
       throw new Error('Invalid workspace bounds.');
     const window = getWindow();
     if (!window || window.isDestroyed()) return;
+    // The page reports CSS pixels, but views are placed in device-independent pixels. The two differ
+    // once the page is zoomed (Ctrl +/-), so scale the position and keep the IDE at the same zoom.
+    const zoom = event.sender.getZoomFactor() || 1;
+    if (view.webContents.getZoomFactor() !== zoom)
+      view.webContents.setZoomFactor(zoom);
+    const x = cssX * zoom;
+    const y = cssY * zoom;
+    const width = cssWidth * zoom;
+    const height = cssHeight * zoom;
     const [maxWidth, maxHeight] = window.getContentSize();
     const left = Math.max(0, Math.min(maxWidth, Math.floor(x)));
     const top = Math.max(0, Math.min(maxHeight, Math.floor(y)));
@@ -236,6 +283,20 @@ export function installIDE(
     if (!view) throw new Error('Open a local project first.');
     await view.webContents.executeJavaScript(
       `window.dispatchEvent(new CustomEvent('edorax:new-terminal'))`,
+    );
+  });
+  ipcMain.handle('ide:select-theme', async (event) => {
+    requireRenderer(event);
+    if (!view) throw new Error('Open a local project first.');
+    await view.webContents.executeJavaScript(
+      `window.dispatchEvent(new CustomEvent('edorax:select-theme'))`,
+    );
+  });
+  ipcMain.handle('ide:open-extensions', async (event) => {
+    requireRenderer(event);
+    if (!view) throw new Error('Open a local project first.');
+    await view.webContents.executeJavaScript(
+      `window.dispatchEvent(new CustomEvent('edorax:open-extensions'))`,
     );
   });
   ipcMain.handle('ide:open-with-menu', async (event, position) => {
@@ -311,9 +372,10 @@ export function installIDE(
       `window.dispatchEvent(new CustomEvent('edorax:reveal-explorer'))`,
     );
   });
-  ipcMain.handle('ide:snippet', async (event, source, filename) => {
+  ipcMain.handle('ide:snippet', async (event, source, filename, course) => {
     requireRenderer(event);
-    if (!view) throw new Error('Open a local project first.');
+    if (!view || activeCourse !== course)
+      throw new Error('Open this course’s project first.');
     const result = await runtime.importSnippet(source, filename);
     // Only a main-created file URI crosses into the IDE; course source is never evaluated.
     await view.webContents.executeJavaScript(

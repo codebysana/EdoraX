@@ -22,6 +22,10 @@ npm --prefix desktop start
 
 Remote backends must use HTTPS. The API must implement `GET /api/v1/catalog`, returning the existing Buildment success envelope. The app imports only shared API types from `server/`; it does not bundle backend runtime code. Run install/build commands from this repository checkout.
 
+On Windows, `pnpm --dir desktop make` builds an assisted NSIS setup wizard. It lets the learner
+choose the install folder and whether to add Start menu and desktop shortcuts. The final page
+includes a checkbox to launch Edorax after installation.
+
 Sign-in opens the default browser (Chrome if configured as default). The web app defaults to `http://localhost:3000`; configure `BUILDMENT_WEB_URL` alongside `BUILDMENT_API_URL` for other deployments. Deploy the included web connection page and backend desktop authorization/exchange endpoints together. A short-lived, single-use code with proof verification returns through a loopback callback. Session tokens remain in Electron main-process memory, and closing the app requires signing in again. No database migration is required.
 
 Course requests run in Electron's main process over a narrowly scoped preload bridge. Renderer Node integration is disabled. There are no credentials, fixture courses, or secrets in the application. Cover images use remote HTTPS URLs or local HTTP URLs; missing images show a decorative placeholder.
@@ -66,6 +70,14 @@ BUILDMENT_WEB_URL=https://edorax.com npm --prefix desktop start
 ```
 
 The reader sidebar and heading outline are shared with web. Desktop bundles DM Sans, Unbounded, and JetBrains Mono locally, so typography does not require a font-network request. HTTPS links in lesson prose open in the system browser; same-course chapter links stay in the desktop reader.
+
+## Shell labs
+
+Shell labs come from the Edorax server (`GET /api/v1/shell-labs/version` and `/api/v1/shell-labs`), not from the installer. The app checks the version when it starts, after sign-in and when the Shell tab opens, and downloads the full list only when the version changed. The last good list is saved as `shell-labs.json` in the app's user data folder, so labs still open offline. A first start with no saved list and no network shows no labs until the app is online and signed in. For development and tests, the app falls back to a folder of YAML files when there is no saved list: `EDORAX_LABS_DIR`, or `desktop/labs/shell`. `pnpm sync:labs` (with `EDORAX_CORE_DIR` set to an Edorax Core checkout) fills that folder; it is no longer part of the installer.
+
+## Forced updates
+
+The server decides which app versions may run, and the admin dashboard controls the rules separately for each platform (macOS, Windows and Linux): the minimum version, the latest version, the download address, the message and a list of blocked versions. Every backend request from the app carries two headers: `X-Edorax-Desktop-Version` (the `version` in `desktop/package.json`, read with `app.getVersion()`) and `X-Edorax-Desktop-Platform` (`darwin`, `win32` or `linux`, from `process.platform`; the platform header is left out on any other platform). The app reads its rules at `GET /api/v1/desktop/version?platform=<platform>`, which answers `{ minimumVersion, latestVersion, downloadUrl, message, blockedVersions }` (a missing `blockedVersions` counts as an empty list). A version below the minimum, or exactly equal to one of the blocked versions (build info after `+` is ignored), gets HTTP 426 with the code `DESKTOP_UPDATE_REQUIRED`, and the app then shows a full-window "Update required" screen that cannot be closed, with a download button (https addresses only) and a "Check again" button. A blocked version stays blocked even when it is the latest or above the minimum; its screen says "This version (X) has a known problem. Install version Y to continue." A version below the latest that is not required only sees a small banner that can be dismissed. The app reads the policy at start, every 4 hours and when the window gets focus (at most once per 10 minutes), and saves the last good one, with its platform, as `update-policy.json` in the user data folder (a file saved for another platform is ignored; an older file without `blockedVersions` still loads). Offline, an app already known to be too old or blocked stays blocked; an app that has never read a policy is not blocked, and bad or missing version data never blocks anyone (an invalid entry in `blockedVersions` is ignored, not the whole policy). Apps built before this feature send no version and cannot be forced. Every release must raise `version` in `desktop/package.json`, or the check cannot tell the new build from the old one.
 
 ## Edorax branding
 
@@ -157,3 +169,23 @@ npm --prefix desktop run package
 
 The real Docker test uses its own integration scope and skips existing resources.
 Local filesystem/PTY tests use temporary folders and remove only their own files.
+
+### Course folders and standalone terminal
+
+Each course remembers its native-selected project folder across app restarts.
+The IDE toolbar always exposes **Open folder** and **New project**; new projects
+start empty. Switching courses restores that course's folder when the IDE opens.
+A missing/moved folder shows a recovery message rather than opening another course.
+Only one Theia backend is active: switching to another course's IDE closes the
+previous backend (save your work first).
+
+**Terminal** in the lesson toolbar opens a separate local xterm panel without
+starting Theia. It starts in the course folder, or the user's home directory when
+no folder has been selected. Hiding the panel preserves the shell; leaving the
+course closes its connection. Changing the course project folder restarts the
+terminal in the new folder when it is next opened.
+
+Shell snippets expose **Run in terminal**, which submits their contents to the
+local shell. The existing Docker exercise workspace remains separate from this
+standalone terminal. New local projects start empty; no course template is generated.
+The lesson toolbar keeps Close, Focus, Open folder, and New project accessible.

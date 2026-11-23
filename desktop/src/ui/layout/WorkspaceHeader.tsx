@@ -1,7 +1,11 @@
 import { DesktopToolbar } from './DesktopToolbar';
-import { ArrowLeft } from 'lucide-react';
+import logo from '../../assets/edorax.svg';
+import { ThemeToggle } from './ThemeToggle';
+import { ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 import { AccountMenu } from '../auth/AccountMenu';
+import { NotificationsBell } from '../notifications/NotificationsBell';
 import type { Session } from '../auth/useSession';
+
 export function WorkspaceHeader({
   selected,
   courseTitle,
@@ -17,8 +21,14 @@ export function WorkspaceHeader({
   return (
     <>
       <DesktopToolbar>
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          {selected && (
+        {!selected && (
+          <div className="flex items-center gap-2.5 select-none">
+            <img src={logo} alt="" className="size-7" />
+            <span className="font-heading text-base font-bold tracking-tight">edorax</span>
+          </div>
+        )}
+        {selected && (
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
               onClick={backToCourses}
               aria-label="Back to courses"
@@ -27,23 +37,42 @@ export function WorkspaceHeader({
             >
               <ArrowLeft size={18} />
             </button>
-          )}
-          <div className="min-w-0 select-none">
-            <p className="truncate text-[13px] font-semibold leading-5">
-              {selected ? courseTitle || 'Course' : 'Courses'}
-            </p>
-            <p className="text-[11px] leading-4 text-muted-foreground">
-              Edorax
+            <p className="truncate select-none text-[13px] font-semibold leading-5">
+              {courseTitle || 'Course'}
             </p>
           </div>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <ThemeToggle />
+          <NotificationsBell />
+          <AccountMenu session={session} />
         </div>
-        <AccountMenu session={session} />
       </DesktopToolbar>
       {(authError || authBusy) && (
-        <div className="shrink-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-8 py-3 text-sm">
-          <p role={authError ? 'alert' : 'status'}>
-            {authError || 'Complete sign-in in your browser, then return here.'}
-          </p>
+        <div
+          className={`shrink-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b px-8 py-3 text-xs ${
+            authError
+              ? 'border-rose-500/20 bg-rose-500/10 text-rose-900 dark:text-rose-200'
+              : 'border-border bg-card text-foreground'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {authError ? (
+              <AlertCircle
+                size={15}
+                className="shrink-0 text-rose-600 dark:text-rose-400"
+              />
+            ) : (
+              <Loader2
+                size={15}
+                className="shrink-0 animate-spin text-primary"
+              />
+            )}
+            <p role={authError ? 'alert' : 'status'} className="truncate">
+              {authError ||
+                'Complete sign-in in your browser window, then return here.'}
+            </p>
+          </div>
           {authBusy ? (
             <button
               onClick={() =>
@@ -53,14 +82,14 @@ export function WorkspaceHeader({
                     setAuthError('Could not cancel sign-in. Please try again.'),
                   )
               }
-              className="underline underline-offset-4"
+              className="font-medium underline underline-offset-4 hover:opacity-80"
             >
               Cancel sign-in
             </button>
           ) : (
             <button
               onClick={() => setAuthError('')}
-              className="underline underline-offset-4"
+              className="font-medium underline underline-offset-4 hover:opacity-80"
             >
               Dismiss
             </button>

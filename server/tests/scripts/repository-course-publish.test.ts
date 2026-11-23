@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { unzipSync } from "fflate";
 import { load as loadYaml } from "js-yaml";
-import { courseDetailsUpdate, courseSourceHash, ownershipSlugGroups, packageZip, publishingSettings, selectedPackages } from "../../scripts/repository-course-publish.js";
+import { courseDetailsUpdate, courseInstructorEmail, courseSourceHash, instructorEmailsFor, ownershipSlugGroups, packageZip, publishingSettings, selectedPackages } from "../../scripts/repository-course-publish.js";
 import { coursesRootForServer } from "../../scripts/course-source.js";
 
 const temporary: string[] = [];
@@ -108,10 +108,31 @@ describe("repository course publishing selection", () => {
     const stale = { title: "Old preview title", description: "A focused preview", projectGoal: "Learn a skill",
       difficulty: "Advanced", estimatedHours: 5, category: "TECH" as const, coverUrl: "https://example.com/cover.png", assistant: null };
     expect(courseDetailsUpdate(manifest, stale)).toEqual({
-      title: "Example", description: "Example course", difficulty: "Beginner", estimatedHours: 2, category: "SOFT_SKILLS",
+      title: "Example", description: "Example course", difficulty: "Beginner", estimatedHours: 2, category: "SOFT_SKILLS", tags: [],
     });
-    const current = { ...stale, title: "Example", description: "Example course", difficulty: "Beginner", estimatedHours: 2, category: "SOFT_SKILLS" as const };
+    const current = { ...stale, title: "Example", description: "Example course", difficulty: "Beginner", estimatedHours: 2, category: "SOFT_SKILLS" as const, tags: [] };
     expect(courseDetailsUpdate(manifest, current)).toBeNull();
+  });
+
+  it("maps category: cloud-devops in course.yaml to the Cloud and DevOps category", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "buildment-course-category-"));
+    temporary.push(root);
+    fs.writeFileSync(path.join(root, "publishing.yaml"), "instructorEmail: devweekends@gmail.com\n");
+    course(root, "ready", "repositoryPublish: true\ncategory: cloud-devops\n");
+    const manifest = selectedPackages(root)[0]!.manifest;
+    expect(manifest.category).toBe("cloud-devops");
+    const current = { title: "Example", description: "Example course", projectGoal: "Learn a skill", difficulty: "Beginner",
+      estimatedHours: 2, category: "TECH" as const, coverUrl: null, assistant: null, tags: [] };
+    expect(courseDetailsUpdate(manifest, current)).toEqual({ category: "CLOUD_DEVOPS" });
+    expect(courseDetailsUpdate(manifest, { ...current, category: "CLOUD_DEVOPS" })).toBeNull();
+  });
+
+  it("rejects a category course.yaml does not know", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "buildment-course-category-"));
+    temporary.push(root);
+    fs.writeFileSync(path.join(root, "publishing.yaml"), "instructorEmail: devweekends@gmail.com\n");
+    course(root, "ready", "repositoryPublish: true\ncategory: devops\n");
+    expect(() => selectedPackages(root)).toThrow();
   });
 
   it("copies tutor settings by value and clears them when the source drops the block", () => {
@@ -121,10 +142,43 @@ describe("repository course publishing selection", () => {
     course(root, "ready", "repositoryPublish: true\n");
     const manifest = selectedPackages(root)[0]!.manifest;
     const base = { title: "Example", description: "Example course", projectGoal: "Learn a skill", difficulty: "Beginner",
-      estimatedHours: 2, category: "TECH" as const, coverUrl: null };
+      estimatedHours: 2, category: "TECH" as const, coverUrl: null, tags: [] };
     const withBlock = { ...manifest, assistant: { effort: "medium" as const, guidance: "Be precise." } };
     expect(courseDetailsUpdate(withBlock, { ...base, assistant: null })).toEqual({ assistant: { effort: "medium", guidance: "Be precise." } });
     expect(courseDetailsUpdate(withBlock, { ...base, assistant: { effort: "medium", guidance: "Be precise." } })).toBeNull();
     expect(courseDetailsUpdate(manifest, { ...base, assistant: { effort: "low" } })).toEqual({ assistant: null });
   });
 });
+
+describe("per-course instructor", () => {
+  const DEFAULT = "devweekends@gmail.com";
+  const OTHER = "aqibnawab1100@gmail.com";
+
+  function packagesWith(extras: Record<string, string>) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "buildment-instructor-test-"));
+    temporary.push(root);
+    fs.writeFileSync(path.join(root, "publishing.yaml"), `instructorEmail: ${DEFAULT}\n`);
+    for (const [slug, extra] of Object.entries(extras)) course(root, slug, `repositoryPublish: true\n${extra}`);
+    return selectedPackages(root);
+  }
+
+  it("uses the default instructor unless a course names its own", () => {
+    const packages = packagesWith({ plain: "", own: `creatorEmail: ${OTHER}\n` });
+    const bySlug = (slug: string) => packages.find(pkg => pkg.slug === slug)!;
+    expect(courseInstructorEmail(bySlug("plain"), DEFAULT)).toBe(DEFAULT);
+    expect(courseInstructorEmail(bySlug("own"), DEFAULT)).toBe(OTHER);
+  });
+
+  it("puts the course's own instructor in its transport ZIP", () => {
+    const [own] = packagesWith({ own: `creatorEmail: ${OTHER}\n` });
+    const files = unzipSync(packageZip(own!, "create", courseInstructorEmail(own!, DEFAULT)));
+    const manifest = loadYaml(Buffer.from(files["course.yaml"]!).toString("utf8")) as Record<string, unknown>;
+    expect(manifest.creatorEmail).toBe(OTHER);
+  });
+
+  it("lists each instructor once, without regard to case", () => {
+    const packages = packagesWith({ a: "", b: `creatorEmail: ${OTHER}\n`, c: "", d: `creatorEmail: ${OTHER.toUpperCase()}\n` });
+    expect(instructorEmailsFor(packages, DEFAULT)).toEqual([DEFAULT, OTHER]);
+  });
+});
+

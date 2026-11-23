@@ -16,7 +16,14 @@ import { loadCourseGate } from "../progress/gate.js";
 import { loadLearnerHabit } from "../progress/learner-habit.js";
 import { milestoneReflectionBlocked } from "../progress/reflection.js";
 import { isCompletableBlock, previousChapterId } from "../progress/rules.js";
-import { releaseForEnrollment, releaseModulesWithBlocks, variantForRelease } from "../courses/releases.js";
+import {
+  releaseForEnrollment,
+  releaseModulesWithBlocks,
+  upgradeEnrollmentToRelease,
+  variantForRelease,
+  readReleaseContent,
+  redirectedChapterSlug,
+} from "../courses/releases.js";
 import { resolveCourseFamily } from "../../shared/lib/course-tracks.js";
 import { findChapterIndex } from "./chapter-slug.js";
 
@@ -26,7 +33,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
  * Everything the chapter reader shows for the signed-in learner. Opening an
  * unlocked chapter also starts it and marks pending review feedback as seen.
  */
-export async function loadChapterReader(courseSlug: string, chapterSlug: string, user: SessionUser, retry = 0): Promise<ChapterReaderView> {
+export async function loadChapterReader(courseSlug: string, chapterSlug: string, user: SessionUser, retry = 0, forDownload = false): Promise<ChapterReaderView> {
   const course = await prisma.course.findUnique({
     where: { slug: courseSlug },
     select: {
@@ -38,6 +45,7 @@ export async function loadChapterReader(courseSlug: string, chapterSlug: string,
       sequential: true,
       familySlug: true,
       variantFamily: true,
+      activeReleaseId: true,
       modules: {
         where: { archivedAt: null },
         orderBy: { order: "asc" },
@@ -69,11 +77,25 @@ export async function loadChapterReader(courseSlug: string, chapterSlug: string,
   if (!course) throw new NotFoundError("Course not found");
 
   const enrollment = await requireBlockSubmissionAccess(course.id, user);
-  const bypassLocking = shouldBypassProgressGating(user);
-  const selectedRelease = await releaseForEnrollment(course.id, enrollment, course.familySlug);
-  const courseModules = selectedRelease ? await releaseModulesWithBlocks(selectedRelease.modules) : course.modules;
 
-  const flatChapters = courseModules.flatMap((mod) =>
+  // Move in-progress learners to the newest release on any chapter open, the same as the course
+  // page does. Without this, a learner who opens a chapter link directly keeps reading the old
+  // text of a chapter that a later release corrected.
+  if (!forDownload && course.activeReleaseId && enrollment.releaseId !== course.activeReleaseId && enrollment.status !== "COMPLETED") {
+    try {
+      const upgraded = await prisma.$transaction((tx) =>
+        upgradeEnrollmentToRelease(tx, enrollment.id, course.activeReleaseId!), { timeout: 60_000 });
+      if (upgraded) enrollment.releaseId = course.activeReleaseId;
+    } catch {
+      // Keep the pinned release readable if the active release cannot accept this learner yet.
+    }
+  }
+
+  const bypassLocking = shouldBypassProgressGating(user);
+  let selectedRelease = await releaseForEnrollment(course.id, enrollment, course.familySlug);
+  let courseModules = selectedRelease ? await releaseModulesWithBlocks(selectedRelease.modules) : course.modules;
+
+  let flatChapters = courseModules.flatMap((mod) =>
     mod.chapters.map((ch) => ({
       ...ch,
       moduleTitle: mod.title,
@@ -81,7 +103,45 @@ export async function loadChapterReader(courseSlug: string, chapterSlug: string,
       blockCount: ch.blocks.filter((block) => isCompletableBlock(block)).length,
     }))
   );
-  const index = findChapterIndex(flatChapters, chapterSlug);
+  let index = findChapterIndex(flatChapters, chapterSlug);
+
+  // Variant-only lessons 404 when the learner is on another track. Before the variant is locked,
+  // switch to the track that owns the lesson so bookmarks still work. After lock, keep them on
+  // their chosen track (do not silently move a grocery learner onto digital-goods).
+  if (index === -1 && selectedRelease && !enrollment.variantLockedAt && enrollment.status !== "COMPLETED") {
+    const content = readReleaseContent(selectedRelease.release.content);
+    for (const [variantSlug, modules] of Object.entries(content.variants ?? {})) {
+      if (variantSlug === selectedRelease.variant) continue;
+      if (findChapterIndex(modules.flatMap((m) => m.chapters), chapterSlug) === -1) continue;
+      if (enrollment.variantSlug !== variantSlug) {
+        await prisma.enrollment.update({
+          where: { id: enrollment.id },
+          data: { variantSlug, variantChosenAt: enrollment.variantChosenAt ?? new Date() },
+        });
+        enrollment.variantSlug = variantSlug;
+      }
+      selectedRelease = { ...selectedRelease, variant: variantSlug, modules };
+      courseModules = await releaseModulesWithBlocks(modules);
+      flatChapters = courseModules.flatMap((mod) =>
+        mod.chapters.map((ch) => ({
+          ...ch,
+          moduleTitle: mod.title,
+          moduleOrder: mod.order,
+          blockCount: ch.blocks.filter((block) => isCompletableBlock(block)).length,
+        }))
+      );
+      index = findChapterIndex(flatChapters, chapterSlug);
+      break;
+    }
+  }
+
+  // A release that removed a lesson can name the lesson that replaced it, so an old link opens that
+  // one. The page then moves to the returned address, the same as it does for a long-form link.
+  if (index === -1 && selectedRelease) {
+    const target = redirectedChapterSlug(readReleaseContent(selectedRelease.release.content), chapterSlug);
+    if (target) index = findChapterIndex(flatChapters, target);
+  }
+
   if (index === -1) throw new NotFoundError("Chapter not found");
 
   const chapter = flatChapters[index]!;
@@ -132,20 +192,22 @@ export async function loadChapterReader(courseSlug: string, chapterSlug: string,
     return { ...base, locked: true, previous: previous ? { slug: previous.slug, title: previous.title } : null, content: null };
   }
 
-  try {
-    await prisma.$transaction(async tx => { await ensureChapterStarted(tx, enrollment.id, chapter.id); });
-  } catch (error) {
-    if (error instanceof NotFoundError && retry === 0) return loadChapterReader(courseSlug, chapterSlug, user, 1);
-    throw error;
+  if (!forDownload) {
+    try {
+      await prisma.$transaction(async tx => { await ensureChapterStarted(tx, enrollment.id, chapter.id); });
+    } catch (error) {
+      if (error instanceof NotFoundError && retry === 0) return loadChapterReader(courseSlug, chapterSlug, user, 1);
+      throw error;
+    }
   }
   const startedEnrollment = await prisma.enrollment.findUniqueOrThrow({ where: { id: enrollment.id } });
   const expectedVariant = variantForRelease(resolveCourseFamily(course.familySlug, course.variantFamily), enrollment.variantSlug);
   if (retry === 0 && (expectedVariant !== variantForRelease(resolveCourseFamily(course.familySlug, course.variantFamily), startedEnrollment.variantSlug) ||
       (selectedRelease && selectedRelease.release.id !== startedEnrollment.releaseId))) {
-    return loadChapterReader(courseSlug, chapterSlug, user, 1);
+    return loadChapterReader(courseSlug, chapterSlug, user, 1, forDownload);
   }
 
-  const [content, currentProgress, helpThreadRow, habit, chapterResponses, predictBlocks, headingNotes] = await Promise.all([
+  const [content, currentProgress, helpThreadRow, habit, chapterResponses, predictBlocks, headingNotes, existingRating, highlights] = await Promise.all([
     prisma.chapter.findUnique({ where: { id: chapter.id }, select: { compiled: true, source: true } }),
     prisma.chapterProgress.findUnique({
       where: { enrollmentId_chapterId: { enrollmentId: enrollment.id, chapterId: chapter.id } },
@@ -163,16 +225,23 @@ export async function loadChapterReader(courseSlug: string, chapterSlug: string,
       select: { id: true },
     }),
     prisma.headingNote.findMany({ where: { userId: user.id, chapterId: chapter.id }, select: { headingId: true, body: true } }),
+    prisma.courseRating.findUnique({
+      where: { courseId_userId: { courseId: course.id, userId: user.id } },
+      select: { id: true },
+    }),
+    prisma.chapterHighlight.findMany({ where: { userId: user.id, chapterId: chapter.id }, select: { id: true, color: true, quote: true, prefix: true, suffix: true, occurrence: true, note: true } }),
   ]);
   if (!content) throw new NotFoundError("Chapter not found");
 
-  await prisma.review.updateMany({
+  if (!forDownload) await prisma.review.updateMany({
     where: { seenAt: null, response: { userId: user.id, block: { chapterId: chapter.id } } },
     data: { seenAt: new Date() },
   });
-  for (const mod of modules) {
-    for (const ch of mod.chapters) {
-      if (ch.id === chapter.id && ch.status === "NOT_STARTED") ch.status = "IN_PROGRESS";
+  if (!forDownload) {
+    for (const mod of modules) {
+      for (const ch of mod.chapters) {
+        if (ch.id === chapter.id && ch.status === "NOT_STARTED") ch.status = "IN_PROGRESS";
+      }
     }
   }
 
@@ -188,6 +257,16 @@ export async function loadChapterReader(courseSlug: string, chapterSlug: string,
   const latest = latestChapterResponses(chapterResponses);
   const answeredIds = new Set(latest.map((response) => response.blockId));
   const predictGate = predictBlocks.length > 0;
+  const moreThanHalfComplete =
+    startedEnrollment.status === "COMPLETED" ||
+    startedEnrollment.percentComplete > 50 ||
+    (flatChapters.length > 0 && startedEnrollment.chaptersCompleted * 2 > flatChapters.length);
+  const promptCourseRating =
+    !forDownload &&
+    moreThanHalfComplete &&
+    !chapterComplete &&
+    !existingRating &&
+    !startedEnrollment.ratingDismissedAt;
 
   return {
     ...base,
@@ -211,9 +290,11 @@ export async function loadChapterReader(courseSlug: string, chapterSlug: string,
       },
       streakMilestone: habit.streakMilestone,
       headingNotes: Object.fromEntries(headingNotes.map((note) => [note.headingId, note.body])),
+      highlights: highlights.map((h) => ({ id: h.id, color: h.color, quote: h.quote, prefix: h.prefix, suffix: h.suffix, occurrence: h.occurrence, note: h.note })),
       predictGate,
       predictRevealed: !predictGate || predictBlocks.every((block) => answeredIds.has(block.id)),
       helpThread: serializeHelpThread(helpThreadRow),
+      promptCourseRating,
     },
   };
 }

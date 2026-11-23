@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { z } from "zod";
+import { isValidSemver } from "../utils/semver.js";
 
 // Every environment variable the API reads is declared here and validated once at
 // boot. Modules import `env`, never `process.env`, so a missing or malformed value
@@ -19,6 +20,12 @@ const optionalString = z
   .string()
   .optional()
   .transform((value) => (value && value.trim() ? value.trim() : undefined));
+
+const optionalSemver = (name: string) =>
+  optionalString.refine(
+    (value) => value === undefined || isValidSemver(value),
+    `${name} must be a plain semver version such as 0.1.0 or 0.2.0-beta.1`
+  );
 
 const schema = z.object({
   NODE_ENV: z
@@ -109,14 +116,46 @@ const schema = z.object({
     .transform((value) => value === "true"),
   LEARNER_QA_MODEL: z.string().trim().min(1).default("claude-haiku-5-5"),
   /** Questions one learner may ask per UTC day. */
-  LEARNER_QA_DAILY_LIMIT: z.coerce.number().int().min(1).max(500).default(20),
+  LEARNER_QA_DAILY_LIMIT: z.coerce.number().int().min(1).max(500).default(80),
   /** Questions the whole platform may answer per UTC day, the cap on the Anthropic bill. */
-  LEARNER_QA_GLOBAL_DAILY_LIMIT: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(100_000)
-    .default(500),
+  LEARNER_QA_GLOBAL_DAILY_LIMIT: z.coerce.number().int().min(1).max(100_000).default(500),
+  /**
+   * The home page's live AI demo (services/ai/home-demo): preset questions only, answers cached,
+   * a daily cap on model calls and a saved answer on any problem. On whenever ANTHROPIC_API_KEY is
+   * set; HOME_AI_DEMO_ENABLED=false turns it off and the page then shows the saved answers.
+   */
+  HOME_AI_DEMO_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false"),
+  /** Model calls the demo may make per UTC day, across all visitors. */
+  HOME_AI_DEMO_DAILY_LIMIT: z.coerce.number().int().min(0).max(5_000).default(100),
+  /** How long one generated answer is reused for every visitor who picks the same question. */
+  HOME_AI_DEMO_CACHE_MINUTES: z.coerce.number().int().min(1).max(10_080).default(60),
+
+  /**
+   * Capstone checker (docs/16-capstone-checker-and-certificates.mdx): automated checks plus an AI
+   * grade with the platform's ANTHROPIC_API_KEY, the same key the chapter questions use. On whenever
+   * the key is set; CAPSTONE_CHECK_ENABLED=false switches it off. Only courses with a capstone block
+   * use it, and the limits are counted in the database like the chapter question limits.
+   */
+  CAPSTONE_CHECK_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false"),
+  CAPSTONE_MODEL: z.string().trim().min(1).default("claude-sonnet-5-5"),
+  CAPSTONE_EFFORT: z.enum(["low", "medium", "high"]).default("medium"),
+  /** Input budget for one check; the repo snapshot is trimmed to fit. */
+  CAPSTONE_MAX_INPUT_TOKENS: z.coerce.number().int().min(4_000).max(200_000).default(40_000),
+  CAPSTONE_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1_000).max(32_000).default(8_000),
+  /** Checks one learner may start per capstone block per UTC day. */
+  CAPSTONE_LEARNER_DAILY_LIMIT: z.coerce.number().int().min(1).max(50).default(3),
+  /** AI grades the whole platform may run per UTC day, the cap on the Anthropic bill. */
+  CAPSTONE_GLOBAL_DAILY_LIMIT: z.coerce.number().int().min(1).max(10_000).default(150),
+  /** Optional fine-grained GitHub token, public read only. Without it the API allows 60 calls an hour, about 12 checks. */
+  GITHUB_TOKEN: optionalString,
+  /** Edorax's LinkedIn company id for Add to profile; without it LinkedIn gets the name "Edorax" as text. */
+  CERTIFICATE_LINKEDIN_ORG_ID: optionalString,
 
   /** Private Cloudflare R2 bucket used for instructor-uploaded course images. */
   R2_ENDPOINT: optionalString,
@@ -173,15 +212,50 @@ const schema = z.object({
     .string()
     .optional()
     .transform((value) => value !== "false"),
+  GAMIFICATION_LEAGUE_TIERS: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false"),
+  GAMIFICATION_RECOVERY: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false"),
+
+  /**
+   * DEFAULT policy for forced desktop updates. Admins override it per platform (darwin, win32, linux)
+   * in the admin dashboard; a platform without a saved policy uses these values. The app sends its
+   * version in X-Edorax-Desktop-Version and gets 426 DESKTOP_UPDATE_REQUIRED while it is lower than
+   * the minimum. The default 0.0.0 blocks nothing. Changing them needs an environment change and a restart.
+   */
+  DESKTOP_MIN_VERSION: optionalSemver("DESKTOP_MIN_VERSION"),
+  /** Newest released desktop version, for a soft "update available" prompt. Defaults to DESKTOP_MIN_VERSION. */
+  DESKTOP_LATEST_VERSION: optionalSemver("DESKTOP_LATEST_VERSION"),
+  DESKTOP_DOWNLOAD_URL: z.string().trim().url().default("https://github.com/devweekends/Edorax/releases/latest"),
+  /** Optional short text shown in the update screen; replaces the default 426 message. */
+  DESKTOP_UPDATE_MESSAGE: optionalString,
 
   /** Local testing only: e2e suites sign up repeatedly from one IP. Never set in production. */
   DISABLE_RATE_LIMITS: z
     .string()
     .optional()
     .transform((value) => value === "true"),
+
+  /**
+   * Polar checkout for paid course enrollment. The token and the webhook secret must both be set
+   * before learners can start a Polar session; the API still boots without them so local/dev stays
+   * usable. Each course gets its own Polar product on its first checkout, so no product id is set.
+   */
+  POLAR_ACCESS_TOKEN: optionalString,
+  POLAR_WEBHOOK_SECRET: optionalString,
+  POLAR_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
 });
 
-export type Env = z.infer<typeof schema>;
+type Parsed = z.infer<typeof schema>;
+/** The parsed environment with the desktop version defaults filled in. */
+export type Env = Omit<Parsed, "DESKTOP_MIN_VERSION" | "DESKTOP_LATEST_VERSION"> & {
+  DESKTOP_MIN_VERSION: string;
+  DESKTOP_LATEST_VERSION: string;
+};
 
 function loadEnv(): Env {
   const parsed = schema.safeParse(process.env);
@@ -191,9 +265,12 @@ function loadEnv(): Env {
       .join("\n");
     throw new Error(`Invalid environment configuration:\n${problems}`);
   }
+  const desktopMinVersion = parsed.data.DESKTOP_MIN_VERSION ?? "0.0.0";
   return {
     ...parsed.data,
     APP_URL: parsed.data.APP_URL.replace(/\/$/, ""),
+    DESKTOP_MIN_VERSION: desktopMinVersion,
+    DESKTOP_LATEST_VERSION: parsed.data.DESKTOP_LATEST_VERSION ?? desktopMinVersion,
   };
 }
 
@@ -207,3 +284,9 @@ export const rateLimitsEnabled = !(env.DISABLE_RATE_LIMITS && !isProduction);
 export const isTest = env.NODE_ENV === "test";
 /** Chapter questions need both the switch and a key; either missing hides the feature. */
 export const learnerQaAvailable = env.LEARNER_QA_ENABLED && Boolean(env.ANTHROPIC_API_KEY);
+
+export const homeAiDemoAvailable = env.HOME_AI_DEMO_ENABLED && Boolean(env.ANTHROPIC_API_KEY);
+/** Capstone AI checks need both the switch and the key; automated checks never run without them either. */
+export const capstoneCheckAvailable = env.CAPSTONE_CHECK_ENABLED && Boolean(env.ANTHROPIC_API_KEY);
+/** Paid course Polar checkout needs the org token and the webhook secret. */
+export const polarPaymentsConfigured = Boolean(env.POLAR_ACCESS_TOKEN && env.POLAR_WEBHOOK_SECRET);

@@ -18,7 +18,8 @@ export function useLeaderboardConfetti(view: LeaderboardHubView | null) {
     if (!view || view.status !== "ready") return;
     const key = `${view.category}|${view.scope}|${view.courseId ?? "global"}`;
     const onPodium = view.you.rank >= 1 && view.you.rank <= 3 && view.you.score > 0;
-    const promoted = view.league?.lastWeek?.outcome === "PROMOTED";
+    const outcome = view.league?.lastWeek?.outcome;
+    const promoted = outcome === "PROMOTED" || outcome === "PROMOTED_TARGET" || outcome === "PROMOTED_BOTH";
     if ((!onPodium && !promoted) || celebratedKeyRef.current === key) return;
     celebratedKeyRef.current = key;
     const timer = window.setTimeout(() => {

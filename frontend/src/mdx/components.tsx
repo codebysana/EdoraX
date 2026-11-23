@@ -2,6 +2,7 @@ import type { MDXComponents } from "next-mdx-remote-client/rsc";
 import { QuizComponent } from "@/blocks/quiz/Component";
 import { PredictComponent } from "@/blocks/predict/Component";
 import { AiInterviewComponent } from "@/blocks/ai-interview/Component";
+import { CapstoneCheckComponent } from "@/blocks/capstone-check/Component";
 import { OpenQuestionComponent } from "@/blocks/open-question/Component";
 import { CodeExerciseComponent } from "@/blocks/code/Component";
 import { StepsComponent } from "@/blocks/steps/Component";
@@ -23,6 +24,7 @@ import { slugify } from "@/shared/lib/mdx-headings";
 import { MdxCodeElement, MdxCodeFigure, MdxCodePre } from "@/mdx/code-block";
 import { HeadingNoteButton } from "@/components/learn/heading-note";
 import { sharedLessonBlocks } from "@buildment/learning-ui/lesson-blocks";
+import { ChapterRefChildren } from "@buildment/learning-ui/components/learn/chapter-refs";
 
 const cellBorder = "border border-border";
 
@@ -35,6 +37,7 @@ export const mdxComponents: MDXComponents = {
   Quiz: QuizComponent,
   Predict: PredictComponent,
   AiInterview: AiInterviewComponent,
+  CapstoneCheck: CapstoneCheckComponent,
   OpenQuestion: OpenQuestionComponent,
   CodeExercise: CodeExerciseComponent,
   Steps: StepsComponent,
@@ -54,6 +57,21 @@ export const mdxComponents: MDXComponents = {
   StateMachine: MermaidDiagram,
   EntityDiagram: MermaidDiagram,
   EcosystemGallery,
+  p: ({ children, ...props }: React.ComponentProps<"p">) => (
+    <p {...props}>
+      <ChapterRefChildren>{children}</ChapterRefChildren>
+    </p>
+  ),
+  li: ({ children, ...props }: React.ComponentProps<"li">) => (
+    <li {...props}>
+      <ChapterRefChildren>{children}</ChapterRefChildren>
+    </li>
+  ),
+  blockquote: ({ children, ...props }: React.ComponentProps<"blockquote">) => (
+    <blockquote {...props}>
+      <ChapterRefChildren>{children}</ChapterRefChildren>
+    </blockquote>
+  ),
   h2: ({ children, ...props }: React.ComponentProps<"h2">) => {
     const text = typeof children === "string" ? children : undefined;
     const id = text ? slugify(text) : undefined;
@@ -114,7 +132,7 @@ export const mdxComponents: MDXComponents = {
       {...props}
     />
   ),
-  td: (props: React.ComponentProps<"td">) => (
+  td: ({ children, ...props }: React.ComponentProps<"td">) => (
     <td
       className={cn(
         cellBorder,
@@ -122,7 +140,9 @@ export const mdxComponents: MDXComponents = {
         "[&:first-child]:min-w-[7rem] [&:first-child]:font-semibold [&:first-child]:text-foreground"
       )}
       {...props}
-    />
+    >
+      <ChapterRefChildren>{children}</ChapterRefChildren>
+    </td>
   ),
   figure: MdxCodeFigure,
   pre: MdxCodePre,

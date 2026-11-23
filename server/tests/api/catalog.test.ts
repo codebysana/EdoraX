@@ -3,6 +3,9 @@ import request from "supertest";
 import { createApp } from "../../src/app.js";
 import { prisma } from "../../src/db/prisma.js";
 import { createCourseFixture } from "../helpers/fixtures.js";
+import { createSession } from "../../src/services/auth/session.js";
+import { ensureBaselineRelease, type ReleaseContent } from "../../src/services/courses/releases.js";
+import { createReleaseChapter } from "../../src/services/teach/publish-course-release.js";
 
 const app = createApp();
 let fx: Awaited<ReturnType<typeof createCourseFixture>>;
@@ -95,7 +98,7 @@ describe("self-enrolment and checkout", () => {
     expect(res.body.code).toBe("ALREADY_ENROLLED");
   });
 
-  it("enrols into a paid course as payment-required, then the stub payment activates it", async () => {
+  it("keeps a paid enrollment locked and does not expose the payment stub", async () => {
     const before = await request(app).get(`/api/v1/courses/${paidSlug}/checkout`).set(auth());
     expect(before.body.data.state).toBe("no_enrollment");
 
@@ -112,17 +115,73 @@ describe("self-enrolment and checkout", () => {
     expect(overview.body.data.access).toBe("payment_required");
 
     const pay = await request(app).post(`/api/v1/enrollments/${enrol.body.data.enrollmentId}/payment-stub`).set(auth());
-    expect(pay.status).toBe(200);
-    expect(pay.body.data).toEqual({ courseSlug: paidSlug, alreadyActive: false });
-
-    const paid = await request(app).get(`/api/v1/courses/${paidSlug}/checkout`).set(auth());
-    expect(paid.body.data.state).toBe("already_paid");
+    expect(pay.status).toBe(404);
     const payment = await prisma.payment.findUnique({ where: { enrollmentId: enrol.body.data.enrollmentId } });
-    expect(payment?.status).toBe("SUCCEEDED");
+    expect(payment?.status).toBe("PENDING");
+    const approve = await request(app).post(`/api/v1/admin/manual-access/${enrol.body.data.enrollmentId}/approve`).set(auth());
+    expect(approve.status).toBe(403);
+
+    const admin = await prisma.user.create({ data: { email: `manual-admin-${fx.tag}@test.local`, role: "ADMIN", emailVerified: new Date() } });
+    try {
+      const adminToken = (await createSession(admin.id)).sessionToken;
+      const headers = { Authorization: `Bearer ${adminToken}` };
+      const url = `/api/v1/admin/manual-access/${enrol.body.data.enrollmentId}/approve`;
+      expect((await request(app).post(url).set(headers)).status).toBe(200);
+      const after = await prisma.enrollment.findUniqueOrThrow({ where: { id: enrol.body.data.enrollmentId }, include: { payment: true } });
+      expect(after.lifecycle).toBe("ACTIVE");
+      expect(after.payment).toMatchObject({ status: "SUCCEEDED", provider: "manual" });
+      expect(await prisma.adminAuditLog.count({ where: { actorId: admin.id, targetId: after.id, action: "manual-access.approve" } })).toBe(1);
+      expect((await request(app).post(url).set(headers)).status).toBe(409);
+    } finally {
+      await prisma.adminAuditLog.deleteMany({ where: { actorId: admin.id } });
+      await prisma.session.deleteMany({ where: { userId: admin.id } });
+      await prisma.user.delete({ where: { id: admin.id } });
+    }
   });
 
-  it("will not pay for someone else's enrolment", async () => {
-    const res = await request(app).post(`/api/v1/enrollments/${fx.enrollment.id}/payment-stub`).set({ Authorization: `Bearer ${fx.unverifiedToken}` });
+  it("does not expose the old payment stub", async () => {
+    const res = await request(app).post(`/api/v1/enrollments/${fx.enrollment.id}/payment-stub`).set(auth());
     expect(res.status).toBe(404);
+  });
+});
+
+describe("catalog after a course is republished", () => {
+  let rx: Awaited<ReturnType<typeof createCourseFixture>>;
+
+  beforeAll(async () => {
+    rx = await createCourseFixture();
+    await prisma.$transaction((tx) => ensureBaselineRelease(tx, rx.course.id));
+    // Republish the way the publisher does: a changed lesson gets a new chapter row and the
+    // old row stays live, because learners pinned to release 1 still read it.
+    const moduleRow = await prisma.module.findFirstOrThrow({ where: { courseId: rx.course.id } });
+    const replacement = await prisma.$transaction((tx) => createReleaseChapter(tx, rx.course.id, moduleRow.id, "chapter-a", {
+      title: "Chapter A", summary: null, source: "# A, revised", blocks: [], lessonNum: 1, estimatedMinutes: null,
+      readerMode: "DEFAULT", quizPassingScore: 70, isMilestone: false, key: null,
+    } as never));
+    const first = await prisma.courseRelease.findFirstOrThrow({ where: { courseId: rx.course.id }, orderBy: { number: "desc" } });
+    const content = structuredClone(first.content as unknown as ReleaseContent);
+    content.variants.default[0].chapters = content.variants.default[0].chapters.map((chapter) =>
+      chapter.id === rx.chapterA.id ? { ...chapter, id: replacement.id } : chapter);
+    const release = await prisma.courseRelease.create({ data: { courseId: rx.course.id, number: first.number + 1, content: content as unknown as object } });
+    await prisma.course.update({ where: { id: rx.course.id }, data: { activeReleaseId: release.id } });
+  });
+  afterAll(async () => {
+    await prisma.course.update({ where: { id: rx.course.id }, data: { activeReleaseId: null } });
+    await prisma.courseRelease.deleteMany({ where: { courseId: rx.course.id } });
+    await rx.cleanup();
+  });
+
+  it("keeps both chapter rows, since learners on release 1 still need the old one", async () => {
+    expect(await prisma.chapter.count({ where: { courseId: rx.course.id, archivedAt: null } })).toBe(3);
+  });
+
+  it("counts and lists each chapter once, from the active release", async () => {
+    const list = await request(app).get("/api/v1/catalog");
+    const summary = list.body.data.courses.find((c: { slug: string }) => c.slug === rx.course.slug);
+    expect(summary).toMatchObject({ moduleCount: 1, chapterCount: 2 });
+    const detail = await request(app).get(`/api/v1/catalog/${rx.course.slug}`);
+    expect(detail.body.data).toMatchObject({ moduleCount: 1, chapterCount: 2 });
+    expect(detail.body.data.modules[0].chapters.map((c: { title: string }) => c.title)).toEqual(["Chapter A", "Chapter B"]);
+    expect(detail.body.data.modules[0].chapters.map((c: { id: string }) => c.id)).not.toContain(rx.chapterA.id);
   });
 });

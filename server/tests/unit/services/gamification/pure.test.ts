@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { currentLeaderboardWeek, leaderboardName, rankRows } from "../../../../src/services/gamification/leaderboard.js";
 import { moduleStage } from "../../../../src/services/learner/dashboard-model.js";
+import { leagueDemotionZone, leaguePromotionZone, leagueWeeklyGoal, recoveryQuestComplete } from "../../../../src/shared/gamification/leagues.js";
 
 describe("leaderboard helpers", () => {
   it("shows first name and last initial only", () => {
@@ -26,6 +27,41 @@ describe("leaderboard helpers", () => {
   it("starts the board week on Monday 00:00 UTC", () => {
     expect(currentLeaderboardWeek(new Date("2026-10-25T23:59:00Z")).toISOString()).toBe("2026-10-19T00:00:00.000Z");
     expect(currentLeaderboardWeek(new Date("2026-10-26T00:00:00Z")).toISOString()).toBe("2026-10-26T00:00:00.000Z");
+  });
+});
+
+describe("league promotion helpers", () => {
+  it("uses fixed goals for each tier", () => {
+    expect(leagueWeeklyGoal("BRONZE")).toBe(100);
+    expect(leagueWeeklyGoal("SILVER")).toBe(200);
+    expect(leagueWeeklyGoal("GOLD")).toBe(400);
+    expect(leagueWeeklyGoal("PLATINUM")).toBe(700);
+    expect(leagueWeeklyGoal("COBALT")).toBe(1_000);
+    expect(leagueWeeklyGoal("JADE")).toBe(1_400);
+    expect(leagueWeeklyGoal("QUARTZ")).toBe(1_900);
+    expect(leagueWeeklyGoal("AURORA")).toBe(2_500);
+    expect(leagueWeeklyGoal("ZENITH")).toBe(3_200);
+    expect(leagueWeeklyGoal("DIAMOND")).toBe(4_000);
+  });
+
+  it("opens a top-10-percent zone for tiers with at least five learners", () => {
+    expect(leaguePromotionZone(4)).toBe(0);
+    expect(leaguePromotionZone(5)).toBe(1);
+    expect(leaguePromotionZone(9)).toBe(1);
+    expect(leaguePromotionZone(21)).toBe(3);
+    expect(leaguePromotionZone(100)).toBe(10);
+  });
+
+  it("keeps the demotion zone below the promotion zone", () => {
+    expect(leagueDemotionZone(21, 3)).toBe(17);
+    expect(leagueDemotionZone(26, 3)).toBe(21);
+  });
+
+  it("requires one chapter and 50 XP for recovery", () => {
+    expect(recoveryQuestComplete(0, 100)).toBe(false);
+    expect(recoveryQuestComplete(1, 49)).toBe(false);
+    expect(recoveryQuestComplete(1, 50)).toBe(true);
+    expect(recoveryQuestComplete(2, 100)).toBe(true);
   });
 });
 

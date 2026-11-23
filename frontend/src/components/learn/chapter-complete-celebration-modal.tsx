@@ -1,15 +1,63 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, X } from "lucide-react";
+import { ArrowRight, Award, CheckCircle2, PartyPopper, X } from "lucide-react";
+import { firePartyPopper } from "@/lib/party-popper";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Progress, ProgressLabel } from "@/components/ui/progress";
+import { apiFetch } from "@/lib/api-client";
+import type { MyCertificateState } from "@/shared/lib/certificates";
+
+/**
+ * The certificate button. The certificate is created in the background right after the last
+ * chapter, so this asks until it exists. It lives in its own component, rendered only while the
+ * dialog is open, so every opening starts fresh.
+ */
+function CertificateAction({ courseSlug }: { courseSlug: string }) {
+  const [certificateCode, setCertificateCode] = useState<string | null>(null);
+  const [certificateChecked, setCertificateChecked] = useState(false);
+  useEffect(() => {
+    let live = true;
+    let timer: number | undefined;
+    let tries = 0;
+    const check = () => {
+      apiFetch<MyCertificateState>(`/api/v1/courses/${encodeURIComponent(courseSlug)}/certificate`)
+        .then((state) => {
+          if (!live) return;
+          if (state.certificate) {
+            setCertificateCode(state.certificate.code);
+            setCertificateChecked(true);
+          } else if (state.eligibility.offered && state.eligibility.eligible && ++tries < 8) {
+            timer = window.setTimeout(check, 1500);
+          } else {
+            setCertificateChecked(true);
+          }
+        })
+        .catch(() => live && setCertificateChecked(true));
+    };
+    check();
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [courseSlug]);
+
+  if (certificateCode) {
+    return (
+      <Link href={`/verify/${certificateCode}`} className={buttonVariants({ className: "min-h-11" })}>
+        <Award aria-hidden /> View your certificate
+      </Link>
+    );
+  }
+  return certificateChecked ? null : <Button type="button" disabled className="min-h-11">Preparing your certificate...</Button>;
+}
 
 export function ChapterCompleteCelebrationModal({
   open,
   onClose,
+  courseSlug,
   recap,
   streakMilestone,
   courseCompleted,
@@ -19,6 +67,7 @@ export function ChapterCompleteCelebrationModal({
 }: {
   open: boolean;
   onClose: () => void;
+  courseSlug?: string;
   recap?: { checks: string; open: string; next: string };
   streakMilestone?: number | null;
   /** Confirmed total, including the chapter just completed. */
@@ -40,6 +89,11 @@ export function ChapterCompleteCelebrationModal({
     return () => { if (dialog.open) dialog.close(); };
   }, [open]);
 
+  // Finishing the whole course gets a party popper once each time the dialog opens.
+  useEffect(() => {
+    if (open && courseComplete) firePartyPopper();
+  }, [open, courseComplete]);
+
   return (
     <dialog
       ref={dialogRef}
@@ -59,12 +113,12 @@ export function ChapterCompleteCelebrationModal({
       }}
       aria-labelledby="chapter-complete-title"
       aria-describedby="chapter-complete-description"
-      className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-5 text-card-foreground backdrop:bg-foreground/30 sm:p-6"
+      className={cn("fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] overflow-y-auto rounded-2xl border border-border bg-card p-5 text-card-foreground backdrop:bg-foreground/30 sm:p-6", courseComplete ? "max-w-xl sm:p-8" : "max-w-md")}
     >
       {open ? <>
         <div className="flex items-start justify-between gap-4">
           <div className="flex size-12 items-center justify-center rounded-full bg-muted text-primary motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-200">
-            <CheckCircle2 className="size-7" aria-hidden />
+            {courseComplete ? <PartyPopper className="size-7" aria-hidden /> : <CheckCircle2 className="size-7" aria-hidden />}
           </div>
           <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close celebration" className="size-11">
             <X className="size-5" aria-hidden />
@@ -98,18 +152,22 @@ export function ChapterCompleteCelebrationModal({
             <p className="mt-2 text-xs text-muted-foreground">{percent}% complete</p>
           </div>
         ) : null}
+
         <div className="mt-5 flex flex-col gap-2">
+          {courseComplete && courseSlug ? <CertificateAction courseSlug={courseSlug} /> : null}
           {courseComplete ? (
-            <Link href="/my-courses" className={buttonVariants({ className: "min-h-11" })}>View my courses <ArrowRight aria-hidden /></Link>
+            <Link href="/my-courses" className={buttonVariants({ variant: courseSlug ? "outline" : "default", className: "min-h-11" })}>View my courses <ArrowRight aria-hidden /></Link>
           ) : nextHref ? (
             <Link href={nextHref} className={cn(buttonVariants(), "h-auto min-h-11 whitespace-normal py-3 text-center")}>
               {nextTitle ? `Continue to ${nextTitle}` : "Continue to the next chapter"}
               <ArrowRight className="shrink-0" aria-hidden />
             </Link>
           ) : null}
-          <Button type="button" variant="outline" onClick={onClose} className="min-h-11">
-            {nextHref && !courseComplete ? "Pause here" : "Back to lesson"}
-          </Button>
+          {courseComplete ? null : (
+            <Button type="button" variant="outline" onClick={onClose} className="min-h-11">
+              {nextHref ? "Pause here" : "Back to lesson"}
+            </Button>
+          )}
         </div>
       </> : null}
     </dialog>

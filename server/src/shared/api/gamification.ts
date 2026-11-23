@@ -17,6 +17,10 @@ export type GamificationFeatures = {
   credits: boolean;
   /** Needs XP. */
   leaderboards: boolean;
+  /** Two-path league promotion: top 10% or a published weekly XP goal. */
+  leagueTiers: boolean;
+  /** Recovery quest protection from one weekly demotion. */
+  recovery: boolean;
 };
 
 export type StreakFreezeSummary = {
@@ -117,11 +121,20 @@ export const LEADERBOARD_NEIGHBOURS = 3;
 export type LeaderboardCategory = "weekly_xp" | "all_time_xp" | "speed" | "streak";
 export type LeaderboardScope = "course" | "global";
 
-export type LeagueTier = "BRONZE" | "SILVER" | "GOLD" | "PLATINUM" | "DIAMOND";
-export type LeagueOutcome = "PROMOTED" | "DEMOTED" | "HELD";
+export type LeagueTier = "BRONZE" | "SILVER" | "GOLD" | "PLATINUM" | "COBALT" | "JADE" | "QUARTZ" | "AURORA" | "ZENITH" | "DIAMOND";
+export type LeagueOutcome = "PROMOTED" | "PROMOTED_TARGET" | "PROMOTED_BOTH" | "DEMOTED" | "HELD" | "SHIELD_HELD" | "RECOVERY_HELD";
+export type LeaguePromotionPath = "COMPETITIVE" | "TARGET" | "BOTH" | null;
+
+export type RecoveryProgress = {
+  chapters: number;
+  chapterTarget: number;
+  xp: number;
+  xpTarget: number;
+  completed: boolean;
+};
 
 /** Tiers from lowest to highest; the hub UI uses this order for badges and arrows. */
-export const LEAGUE_TIERS: LeagueTier[] = ["BRONZE", "SILVER", "GOLD", "PLATINUM", "DIAMOND"];
+export const LEAGUE_TIERS: LeagueTier[] = ["BRONZE", "SILVER", "GOLD", "PLATINUM", "COBALT", "JADE", "QUARTZ", "AURORA", "ZENITH", "DIAMOND"];
 
 export type LeaderboardHubEntry = {
   rank: number;
@@ -147,6 +160,16 @@ export type LeagueInfo = {
   promotionZone: number;
   /** Rank at or worse than this demotes at the Monday reset. */
   demotionZone: number;
+  /** Published weekly XP goal for the current tier. */
+  goal: number;
+  /** Whether the learner has reached the current tier's goal this week. */
+  goalMet: boolean;
+  /** Whether the learner currently sits in the competitive promotion zone. */
+  inPromotionZone: boolean;
+  /** Which promotion path the learner currently qualifies for, before settlement. */
+  promotionPath: LeaguePromotionPath;
+  /** Recovery quest progress for the current week, or null when disabled. */
+  recovery: RecoveryProgress | null;
   /** The settled outcome of the week that just closed, when there was one. */
   lastWeek: { outcome: LeagueOutcome; fromTier: LeagueTier } | null;
 };

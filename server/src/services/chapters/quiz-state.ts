@@ -141,7 +141,7 @@ export async function loadQuizChapterState(
   if (!chapter) throw new NotFoundError("Chapter not found");
   const enrollment = await prisma.enrollment.findUnique({
     where: { courseId_userId: { courseId: chapter.courseId, userId } },
-    select: { releaseId: true, variantSlug: true },
+    select: { id: true, releaseId: true, variantSlug: true },
   });
   if (
     enrollment &&
@@ -216,6 +216,28 @@ export async function loadQuizChapterState(
   )
     ? await learnerTokenValues(chapterId, userId)
     : null;
+  const chapterComplete = enrollment
+    ? (
+        await prisma.chapterProgress.findUnique({
+          where: {
+            enrollmentId_chapterId: { enrollmentId: enrollment.id, chapterId },
+          },
+          select: { status: true },
+        })
+      )?.status === "COMPLETED"
+    : false;
+  const assessment = calculateQuizAssessment({
+    blocks,
+    responses: [...latestByBlock.values()].map((response) => ({
+      blockId: response.blockId,
+      status: response.status,
+      score: response.score,
+      maxScore: response.maxScore,
+    })),
+    passingScore: chapter.quizPassingScore,
+  });
+  // A finished submission may show every option's explanation and the right answer.
+  const revealAll = chapterComplete || assessment?.passed === true;
 
   const initialBlockGrades: QuizChapterState["initialBlockGrades"] = {};
   for (const block of quizBlocks) {
@@ -223,6 +245,10 @@ export async function loadQuizChapterState(
     if (!response) continue;
     const parsed = QuizConfigSchema.safeParse(block.config);
     const selected = selectedFor(block.id);
+    const reveal =
+      revealAll ||
+      response.isCorrect === true ||
+      (parsed.success && parsed.data.allowRetry === false);
     // Same rule as single quiz blocks: a wrong answer only reveals the lines about what was picked.
     const explanation = parsed.success
       ? visibleExplanation({
@@ -230,7 +256,7 @@ export async function loadQuizChapterState(
           options: parsed.data.options,
           selected,
           isCorrect: response.isCorrect,
-          allowRetry: parsed.data.allowRetry,
+          allowRetry: reveal ? false : parsed.data.allowRetry,
         })
       : undefined;
     initialBlockGrades[block.id] = {
@@ -238,6 +264,9 @@ export async function loadQuizChapterState(
       isCorrect: response.isCorrect,
       explanation:
         explanation && tokens ? applyTokens(explanation, tokens) : explanation,
+      ...(reveal && parsed.success
+        ? { correctOptionIds: parsed.data.correctOptionIds }
+        : {}),
     };
   }
 
@@ -268,16 +297,7 @@ export async function loadQuizChapterState(
             questions: blockIds.length,
           }
         : null,
-    assessment: calculateQuizAssessment({
-      blocks,
-      responses: [...latestByBlock.values()].map((response) => ({
-        blockId: response.blockId,
-        status: response.status,
-        score: response.score,
-        maxScore: response.maxScore,
-      })),
-      passingScore: chapter.quizPassingScore,
-    }),
+    assessment,
   };
 }
 

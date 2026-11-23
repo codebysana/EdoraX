@@ -1,11 +1,16 @@
 import type { Prisma } from "../../generated/prisma/index.js";
 import { prisma } from "../../db/prisma.js";
+import { cleanChapterSlug } from "../chapters/chapter-slug.js";
 import { appBaseUrl } from "../email/send.js";
 import { escapeHtml, formatMessagePreview } from "../email/format.js";
 import { renderEmailTemplate } from "../email/render.js";
 import { listAdminRecipients } from "../email/admin-recipients.js";
 import { notify, type NotificationRecipient } from "./service.js";
 import { loadSuggestableCourses, rankCourseSuggestions } from "./course-suggestions.js";
+
+function chapterPath(courseSlug: string, chapterSlug: string): string {
+  return `/courses/${courseSlug}/${cleanChapterSlug(chapterSlug)}`;
+}
 
 // Product events → notify(). Each builder loads what the message needs, names the event with a
 // dedupe key, and describes it once for the bell and once for email; channels and preferences are
@@ -64,6 +69,57 @@ export async function notifyMentorHelpQuestion(input: {
         url: `${appBaseUrl()}${path}`,
       }),
       text: `${menteeLabel} asked a question in ${courseTitle} (${lesson}):\n\n${preview}\n\nReply: ${appBaseUrl()}${path}`,
+    }),
+  });
+}
+
+/** The course mentor hears about a lesson report (error, typo, confusing passage, suggestion). */
+export async function notifyMentorLessonReport(input: {
+  threadId: string;
+  messageId: string;
+  body: string;
+  category: string;
+  menteeName: string | null;
+}): Promise<void> {
+  const thread = await prisma.helpThread.findUnique({
+    where: { id: input.threadId },
+    select: {
+      id: true,
+      courseId: true,
+      course: { select: { title: true, mentorId: true } },
+      chapter: { select: { title: true } },
+    },
+  });
+  if (!thread) return;
+
+  const menteeLabel = input.menteeName?.trim() || "A learner";
+  const courseTitle = thread.course.title;
+  const lesson = chapterLabel(thread.chapter?.title);
+  const preview = formatMessagePreview(input.body);
+  const path = `/help/${thread.id}`;
+  const category = input.category.toLowerCase().replace("_", " ");
+
+  await notify({
+    // Reuses the help-question channel so the mentor's existing preferences and
+    // inbox cover reports too; the title and preview make the kind obvious.
+    type: "help.question",
+    recipients: [{ userId: thread.course.mentorId }],
+    dedupeKey: `help-report:${input.messageId}`,
+    title: `${menteeLabel} reported a lesson issue (${category})`,
+    body: `${courseTitle} · ${lesson}: ${formatMessagePreview(input.body, 140)}`,
+    url: path,
+    courseId: thread.courseId,
+    email: async ({ name }) => ({
+      subject: `${menteeLabel} reported a lesson issue · ${courseTitle}`,
+      html: await renderEmailTemplate("notify-mentor-help-question", {
+        name: name ?? "there",
+        learnerName: menteeLabel,
+        courseTitle,
+        lesson,
+        preview,
+        url: `${appBaseUrl()}${path}`,
+      }),
+      text: `${menteeLabel} reported a ${category} in ${courseTitle} (${lesson}):\n\n${preview}\n\nReview: ${appBaseUrl()}${path}`,
     }),
   });
 }
@@ -130,7 +186,8 @@ export async function notifyMenteeHelpThreadResolved(threadId: string): Promise<
 
   const lesson = chapterLabel(thread.chapter?.title);
   const path =
-    thread.chapter?.slug != null ? `/courses/${thread.course.slug}/${thread.chapter.slug}` : `/my-questions/${threadId}`;
+    thread.chapter?.slug != null ? chapterPath(thread.course.slug, thread.chapter.slug) : `/my-questions/${threadId}`;
+
 
   await notify({
     type: "help.resolved",
@@ -222,7 +279,7 @@ export async function notifyMenteeReviewFeedback(input: {
   const { chapter } = response.block;
   const courseTitle = chapter.course.title;
   const lesson = chapterLabel(chapter.title);
-  const path = `/courses/${chapter.course.slug}/${chapter.slug}`;
+  const path = chapterPath(chapter.course.slug, chapter.slug);
   const approved = input.verdict === "APPROVED";
   const verdictLabel = approved ? "approved your submission" : "asked for a revision";
   const preview = formatMessagePreview(input.feedbackPreview, 400);
@@ -393,6 +450,27 @@ ${next ? `<p>${escapeHtml(next.lead)} <a href="${appBaseUrl()}${next.url}">${esc
     },
     { tx }
   );
+}
+
+/** Tells a learner their certificate is ready, with a link to the verify page that shows and downloads it. */
+export async function notifyCertificateIssued(certificate: { id: string; code: string; userId: string; title: string }): Promise<void> {
+  const link = `${appBaseUrl()}/verify/${certificate.code}`;
+  await notify({
+    type: "certificate.issued",
+    recipients: [{ userId: certificate.userId }],
+    dedupeKey: `certificate-issued:${certificate.id}`,
+    title: "Your certificate is ready",
+    body: `${certificate.title}. Certificate ${certificate.code}.`,
+    url: `/verify/${certificate.code}`,
+    email: ({ name }) => ({
+      subject: `Your certificate · ${certificate.title}`,
+      html: `${hi(name)}
+<p>Your certificate for <strong>${escapeHtml(certificate.title)}</strong> is ready.</p>
+<p><a href="${link}">View and download your certificate</a></p>
+<p>Anyone with this link can check that the certificate is real. Certificate ID: ${escapeHtml(certificate.code)}</p>`,
+      text: `Your certificate for ${certificate.title} is ready. View and download it: ${link} Certificate ID: ${certificate.code}`,
+    }),
+  });
 }
 
 type NextCourse = { courseId: string; url: string; lead: string; action: string };

@@ -19,6 +19,7 @@ const MODAL_OPEN_DELAY_MS = 200;
 
 export function ChapterCompletionStrip(props: {
   chapterId: string;
+  courseSlug: string;
   nextLocked: boolean;
   chapterComplete: boolean;
   canMarkComplete: boolean;
@@ -39,6 +40,7 @@ type CelebrationPhase = "idle" | "burst" | "modal";
 
 function ChapterCompletionMoment({
   chapterId,
+  courseSlug,
   nextLocked,
   chapterComplete,
   canMarkComplete,
@@ -53,6 +55,7 @@ function ChapterCompletionMoment({
   streakMilestone = null,
 }: {
   chapterId: string;
+  courseSlug: string;
   nextLocked: boolean;
   chapterComplete: boolean;
   canMarkComplete: boolean;
@@ -71,9 +74,24 @@ function ChapterCompletionMoment({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [celebrationPhase, setCelebrationPhase] = useState<CelebrationPhase>("idle");
+  const [mounted, setMounted] = useState(false);
   const modalTimerRef = useRef<number | null>(null);
   const celebrationAnchorRef = useRef<HTMLDivElement>(null);
   const { track } = useMascot();
+
+  useEffect(() => {
+    const onReflectionComplete = () => {
+      router.refresh();
+    };
+    window.addEventListener("buildment:reflection-complete", onReflectionComplete);
+    return () => window.removeEventListener("buildment:reflection-complete", onReflectionComplete);
+  }, [router]);
+
+  // Until the client hydrates the button is inert server-rendered HTML; keep it disabled so an early
+  // click can't silently do nothing (it becomes interactive as soon as hydration completes).
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   function prefersReducedMotion() {
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -204,7 +222,7 @@ function ChapterCompletionMoment({
               size="sm"
               onClick={onMark}
               loading={pending}
-              disabled={pending}
+              disabled={pending || !mounted}
               className="h-10 w-full min-w-44 rounded-lg px-5 text-sm font-medium sm:w-auto"
             >
               {pending ? "Saving…" : "Mark chapter complete"}
@@ -227,6 +245,7 @@ function ChapterCompletionMoment({
 
       <ChapterCompleteCelebrationModal
         open={celebrationPhase === "modal"}
+        courseSlug={courseSlug}
         onClose={closeCelebration}
         recap={recap}
         streakMilestone={streakMilestone}

@@ -13,6 +13,7 @@ import { updateCourseSettings } from "@/server/actions/modules";
 import type { CourseSettingsInput, CourseSettingsView } from "@/shared/api/teach";
 import { uploadCourseImage } from "@/lib/course-media-upload";
 import { isSafeAssetUrl } from "@/shared/lib/asset-url";
+import { COURSE_CATEGORY_INFO } from "@/lib/course-categories";
 
 type SettingsSection = "details" | "learning" | "pricing";
 
@@ -25,6 +26,8 @@ function settingsFromCourse(course: CourseSettingsView): CourseSettingsInput {
     difficulty: course.difficulty ?? "",
     estimatedHours: course.estimatedHours == null ? "" : String(course.estimatedHours),
     category: course.category,
+    subcategory: course.subcategory ?? "",
+    tags: course.tags,
     sequential: course.sequential,
     autoGradeOpenQuestions: course.autoGradeOpenQuestions,
     ...(course.hasVariants ? { variantAssignment: course.variantAssignment } : {}),
@@ -45,6 +48,8 @@ function settingsFromForm(form: HTMLFormElement): CourseSettingsInput {
     difficulty: String(data.get("difficulty") ?? ""),
     estimatedHours: String(data.get("estimatedHours") ?? ""),
     category: String(data.get("category") ?? "TECH"),
+    subcategory: String(data.get("subcategory") ?? ""),
+    tags: String(data.get("tags") ?? "").split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean),
     sequential: data.get("sequential") === "on",
     autoGradeOpenQuestions: data.get("autoGradeOpenQuestions") === "on",
     ...(variantAssignment === null ? {} : { variantAssignment: String(variantAssignment) }),
@@ -62,6 +67,8 @@ function sectionChanged(current: CourseSettingsInput, saved: CourseSettingsInput
       current.difficulty !== saved.difficulty ||
       current.estimatedHours !== saved.estimatedHours ||
       current.category !== saved.category ||
+      current.subcategory !== saved.subcategory ||
+      current.tags.join(",") !== saved.tags.join(",") ||
       current.sequential !== saved.sequential ||
       current.autoGradeOpenQuestions !== saved.autoGradeOpenQuestions ||
       current.variantAssignment !== saved.variantAssignment
@@ -79,6 +86,8 @@ function mergeSection(saved: CourseSettingsInput, current: CourseSettingsInput, 
       difficulty: current.difficulty,
       estimatedHours: current.estimatedHours,
       category: current.category,
+      subcategory: current.subcategory,
+      tags: current.tags,
       sequential: current.sequential,
       autoGradeOpenQuestions: current.autoGradeOpenQuestions,
       variantAssignment: current.variantAssignment,
@@ -234,8 +243,14 @@ export function CourseSettings({ course }: { course: CourseSettingsView }) {
           </div>
           <Field label="Catalog category" htmlFor="course-category" hint="Learners can filter the catalog by category.">
             <select id="course-category" name="category" defaultValue={course.category} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30">
-              <option value="TECH">Tech</option><option value="SOFT_SKILLS">Soft skills</option>
+              {COURSE_CATEGORY_INFO.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
             </select>
+          </Field>
+          <Field label="Subcategory" htmlFor="course-subcategory" hint="Examples: AI, Full Stack, AWS, or System Design.">
+            <Input id="course-subcategory" name="subcategory" defaultValue={course.subcategory ?? ""} maxLength={80} placeholder="Full Stack" className="h-10" />
+          </Field>
+          <Field label="Search tags" htmlFor="course-tags" hint="Comma-separated topics learners can search and filter by.">
+            <Input id="course-tags" name="tags" defaultValue={course.tags.join(", ")} maxLength={400} placeholder="React, TypeScript, APIs" className="h-10" />
           </Field>
           <label className="flex items-start gap-3 rounded-xl border bg-muted/25 p-4">
             <input type="checkbox" name="sequential" defaultChecked={course.sequential} className="mt-1 size-4 accent-primary" />
@@ -264,13 +279,21 @@ export function CourseSettings({ course }: { course: CourseSettingsView }) {
       <section id="pricing" aria-labelledby="pricing-title" className="scroll-mt-24 overflow-hidden rounded-2xl border bg-card">
         <SectionHeading icon={Wallet} title="Pricing" description="Choose how learners enroll in this course." id="pricing-title" />
         <div className="grid gap-5 p-5 sm:grid-cols-2 sm:p-6">
-          <Field label="Enrollment type" htmlFor="course-pricing">
-            <select id="course-pricing" name="pricingType" value={pricingType} onChange={(event) => setPricingType(event.target.value as typeof pricingType)} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30">
-              <option value="FREE">Free</option><option value="PAID">Paid</option>
-            </select>
-          </Field>
-          <div className="hidden sm:block" />
-          <Field label="Price" htmlFor="course-price" hint={pricingType === "FREE" ? "Free courses do not need a price." : undefined}>
+          <fieldset className="space-y-2 sm:col-span-2">
+            <legend className="text-sm font-medium">Enrollment type</legend>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {([
+                { value: "FREE", label: "Free", description: "Learners enroll without paying." },
+                { value: "PAID", label: "Paid", description: "Set a price for this course." },
+              ] as const).map((option) => (
+                <label key={option.value} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors ${pricingType === option.value ? "border-primary bg-primary/5" : "border-input hover:bg-muted/40"}`}>
+                  <input type="radio" name="pricingType" value={option.value} checked={pricingType === option.value} onChange={() => setPricingType(option.value)} className="mt-0.5 size-4 accent-primary" />
+                  <span><span className="block text-sm font-medium">{option.label}</span><span className="mt-1 block text-xs text-muted-foreground">{option.description}</span></span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <Field label="Price" htmlFor="course-price" hint={pricingType === "FREE" ? "Select Paid to set a course price." : "Enter the price learners will pay."}>
             <Input id="course-price" name="priceDollars" type="number" min={0.01} step={0.01} defaultValue={course.pricingType === "PAID" && course.priceCents > 0 ? (course.priceCents / 100).toFixed(2) : ""} disabled={pricingType === "FREE"} required={pricingType === "PAID"} placeholder="49.00" className="h-10" />
           </Field>
           <Field label="Currency" htmlFor="course-currency">

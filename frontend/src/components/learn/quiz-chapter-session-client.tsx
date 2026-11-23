@@ -2,31 +2,19 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ChevronLeft,
-  ChevronRight,
-  PlayCircle,
-  RotateCcw,
-  X,
-} from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, PlayCircle, RotateCcw, X } from "lucide-react";
 import { Dot } from "@/components/brand/dot";
 import { Button } from "@/components/ui/button";
 import { playFeedback } from "@/lib/sound-feedback";
 import { apiFetch } from "@/lib/api-client";
 import { markChapterComplete } from "@/server/actions/progress";
 import { cn } from "@/lib/utils";
-import {
-  QuizSessionContext,
-  type QuizBlockGrade,
-} from "@buildment/learning-ui/components/learn/quiz-session-context";
+import { QuizSessionContext, type QuizBlockGrade } from "@buildment/learning-ui/components/learn/quiz-session-context";
 import { QuizIntegrityPanel } from "@/components/learn/quiz-integrity-panel";
+import { requestQuizFullscreen, useQuizIntegrity } from "@/lib/integrity/use-quiz-integrity";
+import { useMascot } from "@/lib/engagement/use-mascot";
 import { QuizGuardNotice } from "@/components/learn/quiz-guard-notice";
 import { useQuizGuard } from "@/lib/integrity/quiz-guard";
-import {
-  requestQuizFullscreen,
-  useQuizIntegrity,
-} from "@/lib/integrity/use-quiz-integrity";
-import { useMascot } from "@/lib/engagement/use-mascot";
 
 type QuizResultSummary = { score: number; maxScore: number; questions: number };
 
@@ -37,6 +25,8 @@ type QuizSubmitResponse = QuizResultSummary & {
     score: number | null;
     maxScore: number | null;
     selected: string[];
+    explanation?: string;
+    correctOptionIds?: string[];
   }>;
   assessment: QuizAssessment | null;
 };
@@ -47,34 +37,22 @@ type QuizAssessment = {
   passingScore: number;
   passed: boolean;
   allAttempted: boolean;
-  deterministic: {
-    score: number;
-    weight: number;
-    attempted: number;
-    total: number;
-  } | null;
-  ai: {
-    score: number;
-    weight: number;
-    attempted: number;
-    total: number;
-  } | null;
+  deterministic: { score: number; weight: number; attempted: number; total: number } | null;
+  ai: { score: number; weight: number; attempted: number; total: number } | null;
 };
 
 function isPerfectScore(summary: QuizResultSummary | null) {
-  return Boolean(
-    summary && summary.maxScore > 0 && summary.score === summary.maxScore,
-  );
+  return Boolean(summary && summary.maxScore > 0 && summary.score === summary.maxScore);
 }
 
 function missedQuestionIndices(
   stepIds: string[],
   quizBlockIds: string[],
-  grades: Record<string, QuizBlockGrade>,
+  grades: Record<string, QuizBlockGrade>
 ) {
   const quizIds = new Set(quizBlockIds);
   return stepIds.flatMap((id, index) =>
-    quizIds.has(id) && grades[id]?.isCorrect !== true ? [index] : [],
+    quizIds.has(id) && grades[id]?.isCorrect !== true ? [index] : []
   );
 }
 
@@ -119,62 +97,43 @@ export function QuizChapterSessionClient({
     isPerfectScore(initialScoreSummary)
       ? Math.max(0, total - 1)
       : initialScoreSummary
-        ? (missedQuestionIndices(
-            stepIds,
-            quizBlockIds,
-            initialBlockGrades,
-          )[0] ?? 0)
-        : 0,
+        ? (missedQuestionIndices(stepIds, quizBlockIds, initialBlockGrades)[0] ?? 0)
+        : 0
   );
   const [retryMissed, setRetryMissed] = useState(() =>
     Boolean(
-      initialScoreSummary &&
-      !initialAssessment?.passed &&
+      initialScoreSummary && !initialAssessment?.passed &&
       !isPerfectScore(initialScoreSummary) &&
-      missedQuestionIndices(stepIds, quizBlockIds, initialBlockGrades).length >
-        0,
-    ),
+      missedQuestionIndices(stepIds, quizBlockIds, initialBlockGrades).length > 0
+    )
   );
   const [submitting, setSubmitting] = useState(false);
   const [movingNext, setMovingNext] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Step indexes of questions with no answer, shown as an inline note instead of a browser pop-up.
   const [unanswered, setUnanswered] = useState<number[]>([]);
-  const [scoreSummary, setScoreSummary] = useState<QuizResultSummary | null>(
-    initialScoreSummary,
-  );
-  const [blockGrades, setBlockGrades] =
-    useState<Record<string, QuizBlockGrade>>(initialBlockGrades);
-  const [dirtyBlockIds, setDirtyBlockIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [draftAnswers, setDraftAnswers] = useState<Record<string, string[]>>(
-    {},
-  );
-  const [assessment, setAssessment] = useState<QuizAssessment | null>(
-    initialAssessment,
-  );
+  const [scoreSummary, setScoreSummary] = useState<QuizResultSummary | null>(initialScoreSummary);
+  const [blockGrades, setBlockGrades] = useState<Record<string, QuizBlockGrade>>(initialBlockGrades);
+  const [dirtyBlockIds, setDirtyBlockIds] = useState<Set<string>>(() => new Set());
+  const [draftAnswers, setDraftAnswers] = useState<Record<string, string[]>>({});
+  const [assessment, setAssessment] = useState<QuizAssessment | null>(initialAssessment);
   const [launched, setLaunched] = useState(false);
   const [resultPopupOpen, setResultPopupOpen] = useState(false);
 
-  const perfectScore = useMemo(
-    () => isPerfectScore(scoreSummary),
-    [scoreSummary],
-  );
+  const perfectScore = useMemo(() => isPerfectScore(scoreSummary), [scoreSummary]);
   const assessmentPassed = assessment?.passed ?? false;
-  const canCompleteChapter =
-    canMarkComplete || (assessmentPassed && individualActivityCount === 0);
+  const canCompleteChapter = canMarkComplete || (assessmentPassed && individualActivityCount === 0);
   const reviewMode = scoreSummary !== null;
   const missedIndices = useMemo(
     () => missedQuestionIndices(stepIds, quizBlockIds, blockGrades),
-    [stepIds, quizBlockIds, blockGrades],
+    [stepIds, quizBlockIds, blockGrades]
   );
+  const submissionComplete = Boolean(chapterComplete || assessmentPassed);
   const visibleIndices = useMemo(
-    () =>
-      retryMissed && !perfectScore && missedIndices.length > 0
-        ? missedIndices
-        : Array.from({ length: total }, (_, stepIndex) => stepIndex),
-    [retryMissed, perfectScore, missedIndices, total],
+    () => (launched && submissionComplete) || !(retryMissed && !perfectScore && missedIndices.length > 0)
+      ? Array.from({ length: total }, (_, stepIndex) => stepIndex)
+      : missedIndices,
+    [launched, submissionComplete, retryMissed, perfectScore, missedIndices, total]
   );
   const position = Math.max(0, visibleIndices.indexOf(index));
   const activeIndex = visibleIndices[position] ?? 0;
@@ -188,51 +147,22 @@ export function QuizChapterSessionClient({
     currentBlockId: stepIds[activeIndex] ?? null,
   });
 
-  // Selection, copy and screenshot protection, and the live reports the mentor watches.
   const guard = useQuizGuard({
     enabled: integrity.active,
     attemptId: integrity.session?.attemptId ?? null,
     blockId: stepIds[activeIndex] ?? null,
   });
 
-  const [lastServerState, setLastServerState] = useState({
-    summary: initialScoreSummary,
-    grades: initialBlockGrades,
-    assessment: initialAssessment,
-  });
-  if (
-    lastServerState.summary !== initialScoreSummary ||
-    lastServerState.grades !== initialBlockGrades ||
-    lastServerState.assessment !== initialAssessment
-  ) {
-    setLastServerState({
-      summary: initialScoreSummary,
-      grades: initialBlockGrades,
-      assessment: initialAssessment,
-    });
+  const [lastServerState, setLastServerState] = useState({ summary: initialScoreSummary, grades: initialBlockGrades, assessment: initialAssessment });
+  if (lastServerState.summary !== initialScoreSummary || lastServerState.grades !== initialBlockGrades || lastServerState.assessment !== initialAssessment) {
+    setLastServerState({ summary: initialScoreSummary, grades: initialBlockGrades, assessment: initialAssessment });
     setScoreSummary(initialScoreSummary);
     setBlockGrades(initialBlockGrades);
     setAssessment(initialAssessment);
     setDirtyBlockIds(new Set());
-    const firstMissed = missedQuestionIndices(
-      stepIds,
-      quizBlockIds,
-      initialBlockGrades,
-    )[0];
-    setRetryMissed(
-      Boolean(
-        initialScoreSummary &&
-        !initialAssessment?.passed &&
-        !isPerfectScore(initialScoreSummary) &&
-        firstMissed !== undefined,
-      ),
-    );
-    if (
-      initialScoreSummary &&
-      !initialAssessment?.passed &&
-      !isPerfectScore(initialScoreSummary) &&
-      firstMissed !== undefined
-    ) {
+    const firstMissed = missedQuestionIndices(stepIds, quizBlockIds, initialBlockGrades)[0];
+    setRetryMissed(Boolean(initialScoreSummary && !initialAssessment?.passed && !isPerfectScore(initialScoreSummary) && firstMissed !== undefined));
+    if (initialScoreSummary && !initialAssessment?.passed && !isPerfectScore(initialScoreSummary) && firstMissed !== undefined) {
       setIndex(firstMissed);
     } else if (isPerfectScore(initialScoreSummary)) {
       setIndex(Math.max(0, total - 1));
@@ -246,43 +176,26 @@ export function QuizChapterSessionClient({
   }, [initialAssessment]);
 
   const go = (nextPosition: number) => {
-    const boundedPosition = Math.max(
-      0,
-      Math.min(visibleIndices.length - 1, nextPosition),
-    );
+    const boundedPosition = Math.max(0, Math.min(visibleIndices.length - 1, nextPosition));
     setIndex(visibleIndices[boundedPosition] ?? 0);
   };
 
   useEffect(() => {
     const onAnswerChange = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{ blockId: string; selected: string[] }>
-      ).detail;
+      const detail = (event as CustomEvent<{ blockId: string; selected: string[] }>).detail;
       if (!detail || !Array.isArray(detail.selected)) return;
-      setDraftAnswers((previous) => ({
-        ...previous,
-        [detail.blockId]: detail.selected,
-      }));
+      setDraftAnswers((previous) => ({ ...previous, [detail.blockId]: detail.selected }));
       setDirtyBlockIds((previous) => {
         const next = new Set(previous);
         next.add(detail.blockId);
         return next;
       });
       setSubmitError(null);
-      setUnanswered((previous) =>
-        previous.length > 0
-          ? previous.filter(
-              (stepIndex) => stepIds[stepIndex] !== detail.blockId,
-            )
-          : previous,
-      );
+      setUnanswered((previous) => (previous.length > 0 ? previous.filter((stepIndex) => stepIds[stepIndex] !== detail.blockId) : previous));
     };
     window.addEventListener("buildment:quiz-answer-change", onAnswerChange);
     return () => {
-      window.removeEventListener(
-        "buildment:quiz-answer-change",
-        onAnswerChange,
-      );
+      window.removeEventListener("buildment:quiz-answer-change", onAnswerChange);
     };
   }, [stepIds]);
 
@@ -291,29 +204,16 @@ export function QuizChapterSessionClient({
     setSubmitting(true);
     setSubmitError(null);
     const answers = quizBlockIds.map((blockId) => {
-      const savedCorrectAnswer =
-        blockGrades[blockId]?.isCorrect === true
-          ? blockGrades[blockId].selected
-          : null;
-      let selected =
-        savedCorrectAnswer ??
-        draftAnswers[blockId] ??
-        initialAnswers[blockId] ??
-        [];
-      if (
-        !savedCorrectAnswer &&
-        !Object.prototype.hasOwnProperty.call(draftAnswers, blockId)
-      ) {
+      const savedCorrectAnswer = blockGrades[blockId]?.isCorrect === true
+        ? blockGrades[blockId].selected
+        : null;
+      let selected = savedCorrectAnswer ?? draftAnswers[blockId] ?? initialAnswers[blockId] ?? [];
+      if (!savedCorrectAnswer && !Object.prototype.hasOwnProperty.call(draftAnswers, blockId)) {
         try {
-          const saved = window.localStorage.getItem(
-            `${draftStoragePrefix}:${blockId}`,
-          );
+          const saved = window.localStorage.getItem(`${draftStoragePrefix}:${blockId}`);
           if (saved !== null) {
             const parsed: unknown = JSON.parse(saved);
-            if (
-              Array.isArray(parsed) &&
-              parsed.every((value) => typeof value === "string")
-            ) {
+            if (Array.isArray(parsed) && parsed.every((value) => typeof value === "string")) {
               selected = parsed;
             }
           }
@@ -323,48 +223,29 @@ export function QuizChapterSessionClient({
       }
       return { blockId, selected };
     });
-    const missing = answers.flatMap((answer) =>
-      answer.selected.length === 0 ? [stepIds.indexOf(answer.blockId)] : [],
-    );
+    const missing = answers.flatMap((answer) => (answer.selected.length === 0 ? [stepIds.indexOf(answer.blockId)] : []));
     if (missing.length > 0 && !force) {
       setUnanswered(missing.filter((stepIndex) => stepIndex >= 0));
       setSubmitting(false);
       return;
     }
     setUnanswered([]);
-    integrity.checkPace(
-      reviewMode
-        ? quizBlockIds.filter((blockId) => dirtyBlockIds.has(blockId))
-        : quizBlockIds,
-    );
+    integrity.checkPace(reviewMode ? quizBlockIds.filter((blockId) => dirtyBlockIds.has(blockId)) : quizBlockIds);
 
     try {
-      const body = await apiFetch<QuizSubmitResponse>(
-        `/api/v1/chapters/${encodeURIComponent(chapterId)}/quiz/submit`,
-        {
-          method: "POST",
-          json: { answers },
-        },
-      );
+      const body = await apiFetch<QuizSubmitResponse>(`/api/v1/chapters/${encodeURIComponent(chapterId)}/quiz/submit`, {
+        method: "POST",
+        json: { answers },
+      });
 
-      const summary = {
-        score: body.score,
-        maxScore: body.maxScore,
-        questions: body.questions,
-      };
+      const summary = { score: body.score, maxScore: body.maxScore, questions: body.questions };
       setScoreSummary(summary);
       setAssessment(body.assessment);
       setResultPopupOpen(true);
       track({ type: "quiz_submitted", chapterId });
       setDirtyBlockIds(new Set());
 
-      const gradesFromApi = Array.isArray(body.grades)
-        ? (body.grades as Array<{
-            blockId: string;
-            isCorrect: boolean | null;
-            selected?: string[];
-          }>)
-        : [];
+      const gradesFromApi = Array.isArray(body.grades) ? body.grades : [];
       if (gradesFromApi.length > 0) {
         setBlockGrades((previous) => {
           const next = { ...previous };
@@ -372,12 +253,11 @@ export function QuizChapterSessionClient({
             const existing = previous[grade.blockId];
             next[grade.blockId] = {
               selected: Array.isArray(grade.selected)
-                ? grade.selected.filter(
-                    (item): item is string => typeof item === "string",
-                  )
+                ? grade.selected.filter((item): item is string => typeof item === "string")
                 : (existing?.selected ?? []),
               isCorrect: grade.isCorrect,
-              explanation: existing?.explanation,
+              explanation: grade.explanation ?? existing?.explanation,
+              correctOptionIds: grade.correctOptionIds ?? existing?.correctOptionIds,
             };
           }
           return next;
@@ -387,17 +267,10 @@ export function QuizChapterSessionClient({
       const nextMissed = missedQuestionIndices(
         stepIds,
         quizBlockIds,
-        Object.fromEntries(
-          gradesFromApi.map((grade) => [
-            grade.blockId,
-            { selected: grade.selected ?? [], isCorrect: grade.isCorrect },
-          ]),
-        ),
+        Object.fromEntries(gradesFromApi.map((grade) => [grade.blockId, { selected: grade.selected ?? [], isCorrect: grade.isCorrect }]))
       );
       const passed = Boolean(body.assessment?.passed);
-      setRetryMissed(
-        !passed && !isPerfectScore(summary) && nextMissed.length > 0,
-      );
+      setRetryMissed(!passed && !isPerfectScore(summary) && nextMissed.length > 0);
       if (isPerfectScore(summary) || passed) setIndex(Math.max(0, total - 1));
       else if (nextMissed.length > 0) setIndex(nextMissed[0]);
 
@@ -423,9 +296,7 @@ export function QuizChapterSessionClient({
       router.refresh();
     } catch (error) {
       playFeedback("error");
-      setSubmitError(
-        error instanceof Error ? error.message : "Could not submit the quiz.",
-      );
+      setSubmitError(error instanceof Error ? error.message : "Could not submit the quiz.");
     } finally {
       setSubmitting(false);
     }
@@ -436,20 +307,9 @@ export function QuizChapterSessionClient({
   // the submit screen) Enter submits the assessment. Guards match the reader's shortcut guard.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey
-      )
-        return;
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
       const target = event.target as HTMLElement | null;
-      if (
-        target?.closest(
-          "input, textarea, select, [contenteditable=''], [contenteditable='true'], dialog[open]",
-        )
-      )
-        return;
+      if (target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], dialog[open]")) return;
 
       if (!launched) {
         if (event.key === "Enter") {
@@ -459,7 +319,7 @@ export function QuizChapterSessionClient({
         }
         return;
       }
-      if (submitting || movingNext) return;
+      if (submitting || movingNext || submissionComplete) return;
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
@@ -478,24 +338,11 @@ export function QuizChapterSessionClient({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    launched,
-    submitting,
-    movingNext,
-    position,
-    visibleIndices.length,
-    quizBlockIds.length,
-    perfectScore,
-    go,
-    submitQuiz,
-  ]);
+  }, [launched, submitting, movingNext, submissionComplete, position, visibleIndices.length, quizBlockIds.length, perfectScore, go, submitQuiz]);
 
   const moveToNextChapter = async () => {
     if (!nextHref || movingNext) return;
-    if (
-      chapterComplete ||
-      (!nextLocked && (!assessmentPassed || !canCompleteChapter))
-    ) {
+    if (chapterComplete || (!nextLocked && (!assessmentPassed || !canCompleteChapter))) {
       router.push(nextHref);
       return;
     }
@@ -511,20 +358,14 @@ export function QuizChapterSessionClient({
       track({ type: "chapter_completed", chapterId });
       router.push(nextHref);
     } catch (error) {
-      setSubmitError(
-        error instanceof Error
-          ? error.message
-          : "Could not open the next chapter.",
-      );
+      setSubmitError(error instanceof Error ? error.message : "Could not open the next chapter.");
     } finally {
       setMovingNext(false);
     }
   };
 
-  const progressPct =
-    visibleIndices.length > 0
-      ? ((position + 1) / visibleIndices.length) * 100
-      : 0;
+
+  const progressPct = visibleIndices.length > 0 ? ((position + 1) / visibleIndices.length) * 100 : 0;
 
   const sessionValue = useMemo(
     () => ({
@@ -537,7 +378,7 @@ export function QuizChapterSessionClient({
         void integrity.nextAttempt();
       },
     }),
-    [chapterTitle, total, reviewMode, dirtyBlockIds, blockGrades, integrity],
+    [chapterTitle, total, reviewMode, dirtyBlockIds, blockGrades, integrity]
   );
 
   const exitQuiz = () => {
@@ -552,24 +393,27 @@ export function QuizChapterSessionClient({
   if (total === 0) return null;
 
   if (!launched) {
+    const buttonLabel = submissionComplete
+      ? "Review submission"
+      : assessment
+        ? "Continue assessment"
+        : "Start assessment";
+
     return (
-      <section
-        className="not-prose mb-10 rounded-2xl border bg-card p-5 text-card-foreground shadow-sm sm:p-7"
-        aria-labelledby="quiz-launch-title"
-      >
+      <section className="not-prose mb-10 rounded-2xl border bg-card p-5 text-card-foreground shadow-sm sm:p-7" aria-labelledby="quiz-launch-title">
         <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Chapter assessment
+          {submissionComplete ? "Assessment complete" : "Chapter assessment"}
         </p>
-        <h2
-          id="quiz-launch-title"
-          className="mt-2 text-2xl font-semibold tracking-tight"
-        >
-          {chapterTitle}
-        </h2>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Work through one question at a time in a focused window. Automatic
-          questions count for 80% and AI-graded written answers count for 20%.
-        </p>
+        <h2 id="quiz-launch-title" className="mt-2 text-2xl font-semibold tracking-tight">{chapterTitle}</h2>
+        {submissionComplete ? (
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+            This assessment is finished. Review every question with your answer, the correct answer, and the explanation.
+          </p>
+        ) : (
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Work through one question at a time in a focused window. Automatic questions count for 80% and AI-graded written answers count for 20%.
+          </p>
+        )}
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <Button
             type="button"
@@ -578,24 +422,36 @@ export function QuizChapterSessionClient({
               requestQuizFullscreen();
             }}
             className="gap-2"
+            variant={submissionComplete ? "outline" : "default"}
           >
-            <PlayCircle className="size-4" aria-hidden />
-            {assessment ? "Continue assessment" : "Start assessment"}
+            {submissionComplete ? (
+              <CheckCircle2 className="size-4" aria-hidden />
+            ) : (
+              <PlayCircle className="size-4" aria-hidden />
+            )}
+            {buttonLabel}
           </Button>
-          <span className="text-sm text-muted-foreground">
-            Pass at {assessment?.passingScore ?? 70}% · three graded attempts
-            per written question
-          </span>
+          {!submissionComplete && (
+            <span className="text-sm text-muted-foreground">Pass at {assessment?.passingScore ?? 70}% · three graded attempts per written question</span>
+          )}
         </div>
         {assessment ? (
-          <p className="mt-4 text-sm font-medium">
-            Current score: {assessment.score}% ·{" "}
-            {assessment.passed ? "Passed" : "Not passed yet"}
+          <p className={cn("mt-4 text-sm font-medium", assessment.passed && "text-ok")}>
+            {assessment.passed ? (
+              <span className="inline-flex items-center gap-1.5">
+                <CheckCircle2 className="size-4" aria-hidden />
+                Passed with {assessment.score}%
+              </span>
+            ) : (
+              <>Current score: {assessment.score}% · Not passed yet</>
+            )}
           </p>
         ) : null}
       </section>
     );
   }
+
+  const fullReview = submissionComplete;
 
   return (
     <QuizSessionContext.Provider value={sessionValue}>
@@ -622,9 +478,16 @@ export function QuizChapterSessionClient({
               Quiz: {chapterTitle}
             </h1>
             <p className="mt-3 text-base font-bold text-muted-foreground">
-              Question {position + 1} of {visibleIndices.length}
-              {retryMissed && !perfectScore ? " to retry" : ""}
+              {fullReview
+                ? "Review your submission"
+                : `Question ${position + 1} of ${visibleIndices.length}${retryMissed && !perfectScore ? " to retry" : ""}`}
             </p>
+            {fullReview ? (
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Each question shows the answer you submitted, the correct
+                answer, and the explanation.
+              </p>
+            ) : null}
             <QuizIntegrityPanel
               integrity={integrity}
               questionCount={total}
@@ -635,7 +498,7 @@ export function QuizChapterSessionClient({
               <p className="mt-2 text-base text-muted-foreground">
                 Open questions and code exercises have their own Submit button.
                 AI-graded written answers contribute 20% of the assessment
-                score. Mentor-reviewed writing is tracked separately.
+                score; mentor-reviewed writing is tracked separately.
               </p>
             ) : null}
             {assessment ? (
@@ -702,19 +565,21 @@ export function QuizChapterSessionClient({
                 </div>
               </div>
             ) : null}
-            <div
-              className="mt-4 h-2 overflow-hidden rounded-sm bg-secondary"
-              role="progressbar"
-              aria-valuenow={position + 1}
-              aria-valuemin={1}
-              aria-valuemax={visibleIndices.length}
-              aria-label="Quiz progress"
-            >
+            {fullReview ? null : (
               <div
-                className="h-full rounded-sm bg-primary transition-[width] duration-300 ease-out"
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
+                className="mt-4 h-2 overflow-hidden rounded-sm bg-secondary"
+                role="progressbar"
+                aria-valuenow={position + 1}
+                aria-valuemin={1}
+                aria-valuemax={visibleIndices.length}
+                aria-label="Quiz progress"
+              >
+                <div
+                  className="h-full rounded-sm bg-primary transition-[width] duration-300 ease-out"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+            )}
           </header>
 
           {scoreSummary && resultPopupOpen ? (
@@ -914,10 +779,19 @@ export function QuizChapterSessionClient({
             {steps.map((step, stepIndex) => (
               <div
                 key={stepIds[stepIndex] ?? stepIndex}
-                className={cn(stepIndex === activeIndex ? "block" : "hidden")}
-                aria-hidden={stepIndex !== activeIndex}
+                className={cn(
+                  fullReview || stepIndex === activeIndex ? "block" : "hidden",
+                  fullReview &&
+                    "mb-12 border-b border-border pb-12 last:mb-0 last:border-b-0",
+                )}
+                aria-hidden={!fullReview && stepIndex !== activeIndex}
                 data-integrity-step={stepIds[stepIndex]}
               >
+                {fullReview ? (
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    Question {stepIndex + 1}
+                  </p>
+                ) : null}
                 {step}
               </div>
             ))}
@@ -965,136 +839,153 @@ export function QuizChapterSessionClient({
           ) : null}
 
           <footer className="mt-10 flex items-center justify-between gap-3 border-t border-border pt-6">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={position === 0}
-              onClick={() => go(position - 1)}
-              className="gap-1"
-            >
-              <ChevronLeft className="size-4" aria-hidden />
-              Back
-            </Button>
-            {position < visibleIndices.length - 1 ? (
-              <div className="flex flex-wrap items-center justify-end gap-2">
+            {fullReview ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={exitQuiz}
+              >
+                Close review
+              </Button>
+            ) : (
+              <>
                 <Button
                   type="button"
+                  variant="outline"
                   size="sm"
-                  onClick={() => go(position + 1)}
+                  disabled={position === 0}
+                  onClick={() => go(position - 1)}
                   className="gap-1"
                 >
-                  {retryMissed && !perfectScore
-                    ? "Next missed question"
-                    : "Next"}
-                  <ChevronRight className="size-4" aria-hidden />
+                  <ChevronLeft className="size-4" aria-hidden />
+                  Back
                 </Button>
-                {assessmentPassed && nextHref ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={
-                      movingNext ||
-                      (nextLocked && !chapterComplete && !canCompleteChapter)
-                    }
-                    loading={movingNext}
-                    onClick={() => void moveToNextChapter()}
-                    className="gap-1.5"
-                  >
-                    {movingNext ? "Opening next chapter…" : "Next chapter"}
-                    {!movingNext ? (
+                {position < visibleIndices.length - 1 ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => go(position + 1)}
+                      className="gap-1"
+                    >
+                      {retryMissed && !perfectScore
+                        ? "Next missed question"
+                        : "Next"}
                       <ChevronRight className="size-4" aria-hidden />
+                    </Button>
+                    {assessmentPassed && nextHref ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          movingNext ||
+                          (nextLocked &&
+                            !chapterComplete &&
+                            !canCompleteChapter)
+                        }
+                        loading={movingNext}
+                        onClick={() => void moveToNextChapter()}
+                        className="gap-1.5"
+                      >
+                        {movingNext ? "Opening next chapter…" : "Next chapter"}
+                        {!movingNext ? (
+                          <ChevronRight className="size-4" aria-hidden />
+                        ) : null}
+                      </Button>
                     ) : null}
-                  </Button>
-                ) : null}
-              </div>
-            ) : assessmentPassed && nextHref ? (
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {!perfectScore && quizBlockIds.length > 0 ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={submitting}
-                    loading={submitting}
-                    onClick={() => void submitQuiz()}
-                  >
-                    {submitting ? "Submitting…" : "Submit again"}
-                  </Button>
-                ) : null}
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={
-                    movingNext ||
-                    (nextLocked && !chapterComplete && !canCompleteChapter)
-                  }
-                  loading={movingNext}
-                  onClick={() => void moveToNextChapter()}
-                  className="gap-1.5"
-                >
-                  {movingNext
-                    ? "Opening next chapter…"
-                    : nextLocked && !chapterComplete && !canCompleteChapter
-                      ? "Finish remaining activities"
-                      : "Next chapter"}
-                  {!movingNext &&
-                  (!nextLocked || chapterComplete || canCompleteChapter) ? (
-                    <ChevronRight className="size-4" aria-hidden />
-                  ) : null}
-                </Button>
-              </div>
-            ) : quizBlockIds.length > 0 ? (
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={submitting || perfectScore}
-                  loading={submitting}
-                  onClick={() => void submitQuiz()}
-                >
-                  {submitting
-                    ? "Submitting…"
-                    : perfectScore
-                      ? "Automatic questions complete"
-                      : scoreSummary
-                        ? "Submit again"
-                        : individualActivityCount > 0
-                          ? "Submit automatic answers"
-                          : "Submit assessment"}
-                </Button>
-                {!nextLocked && nextHref ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={submitting}
-                    onClick={() => void moveToNextChapter()}
-                    className="gap-1.5"
-                  >
-                    Next chapter <ChevronRight className="size-4" aria-hidden />
-                  </Button>
-                ) : null}
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <p className="text-sm text-muted-foreground">
-                  Submit each activity above. Its result or review status
-                  appears on the activity.
-                </p>
-                {!nextLocked && nextHref ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void moveToNextChapter()}
-                    className="gap-1.5"
-                  >
-                    Next chapter <ChevronRight className="size-4" aria-hidden />
-                  </Button>
-                ) : null}
-              </div>
+                  </div>
+                ) : assessmentPassed && nextHref ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {!perfectScore && quizBlockIds.length > 0 ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={submitting}
+                        loading={submitting}
+                        onClick={() => void submitQuiz()}
+                      >
+                        {submitting ? "Submitting…" : "Submit again"}
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={
+                        movingNext ||
+                        (nextLocked && !chapterComplete && !canCompleteChapter)
+                      }
+                      loading={movingNext}
+                      onClick={() => void moveToNextChapter()}
+                      className="gap-1.5"
+                    >
+                      {movingNext
+                        ? "Opening next chapter…"
+                        : nextLocked && !chapterComplete && !canCompleteChapter
+                          ? "Finish remaining activities"
+                          : "Next chapter"}
+                      {!movingNext &&
+                      (!nextLocked || chapterComplete || canCompleteChapter) ? (
+                        <ChevronRight className="size-4" aria-hidden />
+                      ) : null}
+                    </Button>
+                  </div>
+                ) : quizBlockIds.length > 0 ? (
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={submitting || perfectScore}
+                      loading={submitting}
+                      onClick={() => void submitQuiz()}
+                    >
+                      {submitting
+                        ? "Submitting…"
+                        : perfectScore
+                          ? "Automatic questions complete"
+                          : scoreSummary
+                            ? "Submit again"
+                            : individualActivityCount > 0
+                              ? "Submit automatic answers"
+                              : "Submit assessment"}
+                    </Button>
+                    {!nextLocked && nextHref ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={submitting}
+                        onClick={() => void moveToNextChapter()}
+                        className="gap-1.5"
+                      >
+                        Next chapter{" "}
+                        <ChevronRight className="size-4" aria-hidden />
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <p className="text-sm text-muted-foreground">
+                      Submit each activity above. Its result or review status
+                      appears on the activity.
+                    </p>
+                    {!nextLocked && nextHref ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void moveToNextChapter()}
+                        className="gap-1.5"
+                      >
+                        Next chapter{" "}
+                        <ChevronRight className="size-4" aria-hidden />
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+              </>
             )}
           </footer>
           {submitError ? (

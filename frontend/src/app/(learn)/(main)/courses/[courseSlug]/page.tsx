@@ -8,9 +8,11 @@ import { requireLearnSurface } from "@/server/auth/guards";
 import { serverApiFetchOrNotFound } from "@/lib/api-server";
 import { CourseOverviewContent } from "@buildment/learning-ui/components/learn/course-overview-content";
 import { WebCourseNavigation } from "@/components/learn/course-navigation";
-import { chooseCourseSpecialisationAction } from "@/server/actions/course-track";
+import { chooseCourseSpecialisationAction, upgradeCourseCurriculumAction } from "@/server/actions/course-track";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { CourseRatingCard } from "@/components/learn/course-rating-card";
+import { CourseRatingLink } from "@/components/learn/course-rating-link";
 
 const loadOverview = cache((courseSlug: string) =>
   serverApiFetchOrNotFound<CourseOverview>(`/api/v1/courses/${encodeURIComponent(courseSlug)}/overview`)
@@ -76,19 +78,19 @@ export default async function CourseOverviewPage({
           className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="size-4" />
-          My courses
+          My learning
         </Link>
         <div className="mt-16 flex flex-col items-center text-center">
           <Lock className="size-8 text-muted-foreground/50" aria-hidden />
           <p className="mt-3 text-sm font-medium text-foreground">Payment required</p>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Complete checkout to unlock chapters and submissions for {course.title}.
+            Complete purchase to unlock chapters and submissions for {course.title}.
           </p>
           <Link
             href={`/courses/${course.slug}/checkout`}
             className={cn(buttonVariants(), "mt-6")}
           >
-            Go to checkout
+            Purchase
           </Link>
         </div>
       </div>
@@ -106,9 +108,36 @@ export default async function CourseOverviewPage({
   // Enroll, sign-up and the variant picker send ?start=1: open the lesson to read next, like a player.
   if (start === "1" && continueHref) redirect(continueHref);
 
+  const canRateCourse =
+    enrollment.status === "COMPLETED" ||
+    enrollment.percentComplete > 50 ||
+    (syllabus.chapterCount > 0 && enrollment.chaptersCompleted * 2 > syllabus.chapterCount);
+
   return (
     <WebCourseNavigation>
-      <CourseOverviewContent overview={overview} onChooseSpecialisation={chooseCourseSpecialisationAction} />
+      <CourseOverviewContent
+        overview={overview}
+        onChooseSpecialisation={chooseCourseSpecialisationAction}
+        onUpgradeCurriculum={async () => {
+          "use server";
+          await upgradeCourseCurriculumAction(course.slug);
+        }}
+        ratingLink={
+          canRateCourse && !overview.rating && overview.ratingDismissed ? (
+            <CourseRatingLink courseSlug={course.slug} courseTitle={course.title} />
+          ) : null
+        }
+        ratingBanner={
+          canRateCourse && (overview.rating || !overview.ratingDismissed) ? (
+            <CourseRatingCard
+              courseSlug={course.slug}
+              courseTitle={course.title}
+              initialRating={overview.rating}
+              initialDismissed={overview.ratingDismissed}
+            />
+          ) : null
+        }
+      />
     </WebCourseNavigation>
   );
 }

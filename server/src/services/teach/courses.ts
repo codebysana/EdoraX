@@ -12,14 +12,19 @@ import { prisma } from "../../db/prisma.js";
 import { ConflictError, UnprocessableError } from "../../utils/errors.js";
 import type { SessionUser } from "../../types/auth.js";
 import type {
+  CourseCertificateTemplateBody,
   CourseSettingsBody,
   CreateCourseBody,
 } from "../../validations/teach.js";
+import { certificateTemplateId } from "../../shared/lib/certificates.js";
 import { requireCourseById, requireCourseBySlug } from "./access.js";
 import { publishChapters } from "./chapters.js";
-import { ensureBaselineRelease } from "../courses/releases.js";
-import { type ReleaseContent, variantForRelease } from "../courses/releases.js";
+import {
+  ensureBaselineRelease, readReleaseContent,
+  variantForRelease,
+} from "../courses/releases.js";
 import { resolveCourseFamily } from "../../shared/lib/course-tracks.js";
+import { CONFIRMED_ENROLLMENT_WHERE } from "../enrollment/lifecycle.js";
 import { publishDashboardStructureRelease } from "./publish-course-release.js";
 
 // Course lifecycle: DRAFT → PUBLISHED → (ARCHIVED when learners exist | DRAFT when none).
@@ -103,6 +108,8 @@ export async function loadCourseBuilder(
         difficulty: true,
         estimatedHours: true,
         category: true,
+        subcategory: true,
+        tags: true,
         sequential: true,
         status: true,
         pricingType: true,
@@ -112,7 +119,9 @@ export async function loadCourseBuilder(
         familySlug: true,
         variantFamily: true,
         activeReleaseId: true,
-        _count: { select: { enrollments: true } },
+        _count: {
+          select: { enrollments: { where: CONFIRMED_ENROLLMENT_WHERE } },
+        },
         modules: {
           where: { archivedAt: null },
           orderBy: { order: "asc" },
@@ -153,7 +162,7 @@ export async function loadCourseBuilder(
       where: { id: activeReleaseId },
     });
     const shared =
-      (release.content as unknown as ReleaseContent).variants[
+      readReleaseContent(release.content).variants[
         variantForRelease(resolveCourseFamily(familySlug, variantFamily), null)
       ] ?? [];
     const rows = new Map(
@@ -239,6 +248,8 @@ export async function loadCourseSettings(
       difficulty: true,
       estimatedHours: true,
       category: true,
+      subcategory: true,
+      tags: true,
       sequential: true,
       autoGradeOpenQuestions: true,
       coverUrl: true,
@@ -251,9 +262,11 @@ export async function loadCourseSettings(
       familySlug: true,
       variantFamily: true,
       variantAssignment: true,
+      certificate: true,
+      certificateTemplate: true,
       _count: {
         select: {
-          enrollments: true,
+          enrollments: { where: CONFIRMED_ENROLLMENT_WHERE },
           chapters: { where: { archivedAt: null } },
         },
       },
@@ -263,14 +276,37 @@ export async function loadCourseSettings(
     where: { id: user.id },
     select: { zipImportEnabled: true },
   });
-  const { variantFamily, ...settings } = course;
+  const { variantFamily, certificate, certificateTemplate, ...settings } =
+    course;
+  const yamlTemplate =
+    certificate &&
+    typeof certificate === "object" &&
+    !Array.isArray(certificate)
+      ? (certificate as { template?: unknown }).template
+      : undefined;
   return {
     ...settings,
+    certificateTemplate: certificateTemplateId(
+      certificateTemplate ?? yamlTemplate,
+    ),
     hasVariants: Boolean(resolveCourseFamily(course.familySlug, variantFamily)),
     enrollmentCount: _count.enrollments,
     chapterCount: _count.chapters,
     zipImportEnabled: account?.zipImportEnabled ?? false,
   };
+}
+
+/** The certificate design learners of this course receive from now on. Issued certificates keep theirs. */
+export async function setCourseCertificateTemplate(
+  user: SessionUser,
+  courseId: string,
+  input: CourseCertificateTemplateBody,
+): Promise<void> {
+  await requireCourseById(user, courseId);
+  await prisma.course.update({
+    where: { id: courseId },
+    data: { certificateTemplate: input.template },
+  });
 }
 
 /** Read-only preview of the latest saved draft, available to the course team. */
@@ -292,6 +328,8 @@ export async function loadCourseDraftPreview(
       difficulty: true,
       estimatedHours: true,
       category: true,
+      subcategory: true,
+      tags: true,
       activeReleaseId: true,
       familySlug: true,
       variantFamily: true,
@@ -375,7 +413,7 @@ export async function loadCourseDraftPreview(
       where: { id: activeReleaseId, courseId: course.id },
     });
     const shared =
-      (release.content as unknown as ReleaseContent).variants[
+      readReleaseContent(release.content).variants[
         variantForRelease(resolveCourseFamily(familySlug, variantFamily), null)
       ] ?? [];
     const rows = new Map(
@@ -467,6 +505,21 @@ export async function updateCourseSettings(
     }
   }
 
+  const managed = await prisma.course.findUniqueOrThrow({
+    where: { id: courseId },
+    select: { repositorySourceHash: true },
+  });
+  if (
+    managed.repositorySourceHash &&
+    (input.pricingType !== "PAID" ||
+      priceCents !== 1000 ||
+      input.currency.toUpperCase() !== "USD")
+  ) {
+    throw new UnprocessableError(
+      "Repository-managed courses must be priced at $10 USD.",
+    );
+  }
+
   await prisma.course.update({
     where: { id: courseId },
     data: {
@@ -477,6 +530,20 @@ export async function updateCourseSettings(
       difficulty: input.difficulty || null,
       estimatedHours: input.estimatedHours === "" ? null : input.estimatedHours,
       ...(input.category ? { category: input.category } : {}),
+      ...(input.subcategory !== undefined
+        ? { subcategory: input.subcategory || null }
+        : {}),
+      ...(input.tags
+        ? {
+            tags: [
+              ...new Set(
+                input.tags
+                  .map((tag) => tag.trim().toLowerCase())
+                  .filter(Boolean),
+              ),
+            ],
+          }
+        : {}),
       sequential: input.sequential,
       autoGradeOpenQuestions: input.autoGradeOpenQuestions,
       ...(input.variantAssignment
@@ -550,7 +617,7 @@ export async function unpublishCourse(
   if (owned.status !== "PUBLISHED") return { courseSlug: owned.slug };
 
   const enrollments = await prisma.enrollment.count({
-    where: { courseId: owned.id },
+    where: { courseId: owned.id, ...CONFIRMED_ENROLLMENT_WHERE },
   });
   if (enrollments > 0 && !options.confirmedWithEnrollments) {
     throw new ConflictError(
@@ -578,7 +645,7 @@ export async function restoreCourseToDraft(
   const owned = await requireCourseById(user, courseId);
   if (owned.status !== "ARCHIVED") return { courseSlug: owned.slug };
   const learners = await prisma.enrollment.count({
-    where: { courseId: owned.id },
+    where: { courseId: owned.id, ...CONFIRMED_ENROLLMENT_WHERE },
   });
   if (learners)
     throw new ConflictError(
@@ -604,7 +671,7 @@ export async function deleteCourse(
   const owned = await requireCourseById(user, courseId);
 
   const enrollments = await prisma.enrollment.count({
-    where: { courseId: owned.id },
+    where: { courseId: owned.id, ...CONFIRMED_ENROLLMENT_WHERE },
   });
   if (enrollments > 0 && !options.confirmedWithEnrollments) {
     throw new ConflictError(

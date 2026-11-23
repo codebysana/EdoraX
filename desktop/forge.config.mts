@@ -1,17 +1,22 @@
-import { preparePty } from "./scripts/prepare-pty.mjs";
-import type { ForgeConfig } from "@electron-forge/shared-types";
-import { MakerSquirrel } from "@electron-forge/maker-squirrel";
-import { MakerZIP } from "@electron-forge/maker-zip";
-import { MakerDeb } from "@electron-forge/maker-deb";
-import { MakerRpm } from "@electron-forge/maker-rpm";
-import { VitePlugin } from "@electron-forge/plugin-vite";
-import { FusesPlugin } from "@electron-forge/plugin-fuses";
-import { FuseV1Options, FuseVersion } from "@electron/fuses";
+import { preparePty } from './scripts/prepare-pty.mjs';
+import { stageIde } from './scripts/stage-ide.mjs';
+import type { ForgeConfig } from '@electron-forge/shared-types';
+import { MakerNsis } from 'electron-forge-maker-nsis';
+import { MakerZIP } from '@electron-forge/maker-zip';
+import { MakerDeb } from '@electron-forge/maker-deb';
+import { MakerRpm } from '@electron-forge/maker-rpm';
+import { VitePlugin } from '@electron-forge/plugin-vite';
+import { FusesPlugin } from '@electron-forge/plugin-fuses';
+import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const config: ForgeConfig = {
   hooks: {
     generateAssets: async () => {
       await preparePty();
+    },
+    // Ship only the built IDE (lib, plugins, package.json), not ide/node_modules and its sources.
+    prePackage: async () => {
+      await stageIde();
     },
   },
   packagerConfig: {
@@ -19,26 +24,71 @@ const config: ForgeConfig = {
     // Vite bundles application code; retain the native PTY module for rebuilding.
     ignore: (file) =>
       Boolean(file) &&
-      !file.startsWith("/.vite") &&
-      file !== "/node_modules" &&
-      !file.startsWith("/node_modules/node-pty") &&
-      !file.startsWith("/node_modules/node-addon-api"),
-    name: "Edorax",
-    icon: "./assets/edorax",
-    extraResource: ["./assets/edorax.png", "./assets/edorax-dock.png", "./ide"],
+      !file.startsWith('/.vite') &&
+      file !== '/node_modules' &&
+      !file.startsWith('/node_modules/node-pty') &&
+      !file.startsWith('/node_modules/node-addon-api'),
+    name: 'Edorax',
+    executableName: 'Edorax',
+    icon: './assets/edorax.ico',
+    extraResource: [
+      './assets/edorax.png',
+      './assets/edorax-dock.png',
+      // Staged by scripts/stage-ide.mjs; still lands at resources/ide.
+      './.ide-bundle/ide',
+    ],
+    // Lets the website open an exam in the app with an edorax:// link.
     protocols: [
       {
-        name: "Edorax exam",
-        schemes: ["edorax"],
+        name: 'Edorax exam',
+        schemes: ['edorax'],
       },
     ],
   },
-  rebuildConfig: {},
+  // TEMPORARY: node-pty's Electron rebuild needs a working Visual Studio install, which this machine
+  // does not have yet. An empty onlyModules list skips native rebuilds so the app can start.
+  // Remove this line (back to rebuildConfig: {}) once the Build Tools are detected.
+  rebuildConfig: { onlyModules: [] },
   makers: [
-    new MakerSquirrel({}),
-    new MakerZIP({}, ["darwin"]),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    new MakerNsis({
+      oneClick: false,
+      perMachine: false,
+      allowToChangeInstallationDirectory: true,
+      shortcutName: 'Edorax',
+      createStartMenuShortcut: false,
+      createDesktopShortcut: false,
+      runAfterFinish: true,
+      installerIcon: './assets/edorax.ico',
+      uninstallerIcon: './assets/edorax.ico',
+      include: './packaging/nsis-shortcut-options.nsh',
+    }),
+    // Zip for every system.
+    new MakerZIP({}, ['darwin', 'win32', 'linux']),
+    // Debian and Ubuntu: `sudo apt install ./edorax_<version>_amd64.deb`. The package sets up the
+    // sandbox helper, the menu entry and the `edorax` command by itself. These makers take their
+    // settings directly (no `options` wrapper), and `electron-forge make --targets ...` ignores them.
+    new MakerDeb({
+      name: 'edorax',
+      productName: 'Edorax',
+      genericName: 'Learning app',
+      bin: 'Edorax',
+      maintainer: 'Edorax <support@edorax.com>',
+      homepage: 'https://www.edorax.com',
+      categories: ['Education', 'Development'],
+      icon: './assets/edorax.png',
+    }),
+    // Fedora and RHEL: `sudo dnf install ./edorax-<version>.x86_64.rpm`.
+    new MakerRpm({
+      name: 'edorax',
+      productName: 'Edorax',
+      genericName: 'Learning app',
+      bin: 'Edorax',
+      homepage: 'https://www.edorax.com',
+      categories: ['Education', 'Development'],
+      icon: './assets/edorax.png',
+      // rpm 4.20+ (current ubuntu-latest) breaks the stock template's relative `cp -r usr/*`.
+      specTemplate: './packaging/rpm.spec.ejs',
+    }),
   ],
   plugins: [
     new VitePlugin({

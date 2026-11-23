@@ -1,4 +1,5 @@
 import type { CoursePricingType, CourseStatus, EnrollmentLifecycle, RequestStatus, Role } from "../domain/enums.js";
+import type { PlatformCertificateSettings } from "../lib/certificates.js";
 
 // Wire contract for /api/v1/admin — platform administration. Dates are ISO strings.
 
@@ -86,6 +87,8 @@ export type AdminCredentialRow = {
 export type AdminAllocationRow = {
   id: string;
   course: { id: string; slug: string; title: string; status: CourseStatus };
+  /** Platform-admin grant: this course is free for the organization's Pathment assignments. */
+  freeForOrganization: boolean;
   isAllowed: boolean;
   maxEnrollments: number;
   currentEnrollments: number;
@@ -101,6 +104,8 @@ export type AdminCouponPoolRow = {
   percentOff: number;
   maxRedemptions: number;
   redemptionCount: number;
+  reservedCount: number;
+  redeemedCount: number;
   remaining: number;
   active: boolean;
   expiresAt: string | null;
@@ -110,7 +115,17 @@ export type AdminCouponPoolRow = {
 };
 
 export type AdminOrganizationDetail = {
-  organization: { id: string; slug: string; name: string; enrollmentCount: number };
+  organization: { id: string; slug: string; name: string; enrollmentCount: number; creditBalance: number };
+  creditTransactions: Array<{
+    id: string;
+    amountCredits: number;
+    status: "RESERVED" | "COMMITTED" | "RELEASED";
+    createdAt: string;
+    committedAt: string | null;
+    releasedAt: string | null;
+    enrollmentId: string;
+    courseTitle: string;
+  }>;
   credentials: AdminCredentialRow[];
   allocations: AdminAllocationRow[];
   couponPools: AdminCouponPoolRow[];
@@ -178,6 +193,15 @@ export type AdminCoursesView = {
   page: AdminPageInfo;
 };
 
+/** Platform-admin free-for-organization grants for one course. */
+export type AdminCourseOrgAccessView = {
+  course: { id: string; title: string; slug: string };
+  grants: Array<{
+    organization: { id: string; name: string; slug: string };
+    createdAt: string;
+  }>;
+};
+
 /** One-time TOTP enrollment payload: the secret, the otpauth URI, and a scannable QR (data URL). */
 export type AdminTotpEnrollment = { secret: string; otpauthUri: string; qrDataUrl: string };
 
@@ -205,14 +229,72 @@ export type AdminUserDetail = {
   };
   enrollments: Array<{
     id: string;
+    courseId: string;
     courseTitle: string;
     courseSlug: string;
     lifecycle: EnrollmentLifecycle;
     percentComplete: number;
     lastActiveAt: string | null;
+    /** What a refund would return, for a course paid through Polar and not refunded yet; otherwise null. */
+    refund: AdminRefundBreakdown | null;
   }>;
   coursesOwned: Array<{ id: string; title: string; slug: string; status: CourseStatus }>;
 };
+
+export type FeatureFlagInfo = {
+  key: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  category: "gamification" | "infra";
+};
+
+export type AppSettingsView = {
+  refundPolicy: RefundPolicyView;
+  certificateSettings: PlatformCertificateSettings;
+  featureFlags: FeatureFlagInfo[];
+  polar: {
+    configured: boolean;
+    environment: string;
+  };
+};
+
+export type RefundPolicy = {
+  fixedFeeCents: number;
+  internationalFeeBps: number;
+  polarFeeBps: number;
+  edoraxFeeBps: number;
+};
+
+export type RefundPolicyView = {
+  policy: RefundPolicy;
+  example: {
+    paidCents: number;
+    standardRefundCents: number;
+    fullRefundCents: number;
+  };
+};
+export type AdminRefundBreakdown = {
+  currency: string;
+  paidCents: number;
+  fixedFeeCents: number;
+  internationalFeeCents: number;
+  platformFeeCents: number;
+  edoraxFeeCents: number;
+  refundCents: number;
+};
+
+export type AdminRefundOptions = {
+  fullCents: number;
+  standardCents: number;
+  maxCustomCents: number;
+  paidCents: number;
+  alreadyRefundedCents: number;
+  currency: string;
+  breakdown: Omit<AdminRefundBreakdown, "currency">;
+};
+
+export type AdminRefundMode = "FULL" | "STANDARD" | "CUSTOM";
 
 export const ADMIN_ERROR_CODES = {
   REQUEST_ALREADY_REVIEWED: "REQUEST_ALREADY_REVIEWED",
@@ -224,6 +306,7 @@ export const ADMIN_ERROR_CODES = {
   ALREADY_VERIFIED: "ALREADY_VERIFIED",
   NOT_SUSPENDED: "NOT_SUSPENDED",
   ALREADY_SUSPENDED: "ALREADY_SUSPENDED",
+  ALREADY_ENROLLED: "ALREADY_ENROLLED",
 } as const;
 
 /** One row of the platform-admin audit trail (newest first). */
@@ -241,4 +324,116 @@ export type AdminAuditRow = {
 export type AdminAuditView = {
   entries: AdminAuditRow[];
   page: AdminPageInfo;
+};
+
+export type AdminWithdrawalRow = {
+  id: string;
+  instructorId: string;
+  instructorName: string | null;
+  instructorEmail: string;
+  amountCents: number;
+  currency: string;
+  status: "REQUESTED" | "PAID" | "REJECTED";
+  note: string;
+  paymentCount: number;
+  requestedAt: string;
+  resolvedAt: string | null;
+  resolvedById: string | null;
+};
+
+export type FundingSourceRevenueBreakdown = {
+  count: number;
+  originalAmountCents: number;
+  discountAmountCents: number;
+  organizationContributionCents: number;
+  learnerAmountCents: number;
+  instructorShareCents: number;
+  platformRevenueCents: number;
+};
+
+export type AdminRevenueReport = {
+  totalPlatformRevenueCents: number;
+  totalLearnerPaymentsCents: number;
+  totalOrganizationContributionsCents: number;
+  totalInstructorEarningsCents: number;
+  totalInstructorPaidCents: number;
+  totalInstructorPendingCents: number;
+  currency: string;
+  byFundingSource: Record<string, FundingSourceRevenueBreakdown>;
+};
+
+
+export type AdminPaymentStatus = "PENDING" | "SUCCEEDED" | "FAILED" | "REFUNDED";
+
+/** The money recorded for one enrollment. Every amount is in minor units of `currency`. */
+export type AdminEnrollmentPayment = {
+  status: AdminPaymentStatus;
+  currency: string;
+  /** What the learner is charged; for Polar this is the fixed price sent to checkout. */
+  amountCents: number;
+  originalAmountCents: number;
+  discountAmountCents: number;
+  organizationContributionCents: number;
+  learnerAmountCents: number;
+  platformRevenueCents: number;
+  instructorShareCents: number;
+  instructorPayoutPercent: number;
+  instructorPayoutStatus: "NOT_DUE" | "PENDING" | "PAID";
+  fundingSource: string | null;
+  provider: string | null;
+  providerRef: string | null;
+  paidAt: string | null;
+};
+
+/** A coupon or campaign applied to an enrollment's price. */
+export type AdminEnrollmentDiscount = {
+  /**
+   * campaign: a platform discount campaign; instructor_coupon: a course coupon; organization_coupon:
+   * from an organization's pool; admin_enrollment: an admin enrolled the learner without charge.
+   */
+  kind: "campaign" | "instructor_coupon" | "organization_coupon" | "admin_enrollment";
+  id: string;
+  label: string;
+  code: string | null;
+  percentOff: number;
+  autoApplied: boolean;
+  /** Organization coupons only: ISSUED, REDEEMED or CANCELLED. */
+  status: string | null;
+  appliedAt: string | null;
+  organizationName: string | null;
+};
+
+export type AdminEnrollmentRow = {
+  id: string;
+  createdAt: string;
+  lifecycle: EnrollmentLifecycle;
+  source: "DIRECT" | "INVITE" | "SELF" | "PATHMENT";
+  /** userId is null for an organization learner who has not created an account yet. */
+  learner: { userId: string | null; name: string | null; email: string | null };
+  course: { id: string; title: string; slug: string };
+  payment: AdminEnrollmentPayment | null;
+  discounts: AdminEnrollmentDiscount[];
+};
+
+export type AdminEnrollmentsView = {
+  enrollments: AdminEnrollmentRow[];
+  page: AdminPageInfo;
+};
+
+export type AdminEnrollmentDetail = AdminEnrollmentRow & {
+  status: "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "DROPPED";
+  startedAt: string | null;
+  completedAt: string | null;
+  percentComplete: number;
+  instructor: { id: string; name: string | null; email: string };
+  organization: { id: string; name: string } | null;
+  payment:
+    | (AdminEnrollmentPayment & {
+        createdAt: string;
+        updatedAt: string;
+        instructorPayoutPaidAt: string | null;
+        /** For a refunded payment, the refund less Polar's fees that our refund policy sends back. */
+        refund: AdminRefundBreakdown | null;
+      })
+    | null;
 };

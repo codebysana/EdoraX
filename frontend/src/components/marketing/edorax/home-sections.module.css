@@ -1,0 +1,808 @@
+/* Home page sections under the hero, in the Edorax brand: paper and white grounds, ink text,
+   cobalt for actions, links and numbers, the yellow marker for highlights, white cards with a
+   1px line border and square corners. */
+
+.section {
+  width: 100%;
+  background: #f6f7fb;
+  border-top: 1px solid #dce0f2;
+}
+
+.white {
+  background: #ffffff;
+}
+
+.wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 96px 24px;
+  box-sizing: border-box;
+}
+
+.head {
+  max-width: 720px;
+}
+
+.headRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 32px;
+}
+
+.eyebrow {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2434e0;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.h2 {
+  margin: 10px 0 0;
+  font-family: var(--font-unbounded), sans-serif;
+  font-weight: 700;
+  font-size: 40px;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+  color: #0a0f2c;
+}
+
+.line {
+  margin: 14px 0 0;
+  color: #46507a;
+}
+
+.textLink {
+  color: #2434e0;
+  font-weight: 700;
+  text-decoration: none;
+  padding: 10px 0;
+  white-space: nowrap;
+}
+
+.textLink:hover {
+  text-decoration: underline;
+}
+
+/* Buttons */
+.btn,
+.btnGhost,
+.btnYellow,
+.btnLightGhost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 24px;
+  box-sizing: border-box;
+  font-weight: 700;
+  font-size: 17px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn {
+  background: #2434e0;
+  color: #f6f7fb;
+  border: 2px solid #2434e0;
+}
+
+.btn:hover {
+  background: #1c29b8;
+  border-color: #1c29b8;
+}
+
+.btnGhost {
+  background: transparent;
+  color: #0a0f2c;
+  border: 2px solid #0a0f2c;
+}
+
+.btnGhost:hover {
+  background: #0a0f2c;
+  color: #f6f7fb;
+}
+
+.btnYellow {
+  background: #ffc933;
+  color: #0a0f2c;
+  border: 2px solid #ffc933;
+}
+
+.btnYellow:hover {
+  background: #ffd75c;
+}
+
+.btnLightGhost {
+  background: transparent;
+  color: #f6f7fb;
+  border: 2px solid #f6f7fb;
+}
+
+.btnLightGhost:hover {
+  background: #f6f7fb;
+  color: #2434e0;
+}
+
+.ctaRow {
+  margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 20px;
+}
+
+.ctaNote {
+  font-size: 15px;
+  color: #46507a;
+}
+
+/* Numbers band */
+.numbers {
+  width: 100%;
+  background: #0a0f2c;
+  color: #f6f7fb;
+}
+
+.numbersRow {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 44px 24px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.numbersRow > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bigNum {
+  font-family: var(--font-unbounded), sans-serif;
+  font-weight: 700;
+  font-size: 36px;
+  letter-spacing: -0.02em;
+  color: #ffc933;
+}
+
+.numLabel {
+  font-size: 15px;
+  color: #c9cff0;
+}
+
+/* Career tracks picker */
+.picker {
+  margin-top: 36px;
+  display: flex;
+  gap: 24px;
+  align-items: stretch;
+}
+
+.roles {
+  flex: 0 0 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.role,
+.roleOn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 20px;
+  text-align: left;
+  font: inherit;
+  color: #0a0f2c;
+  background: #ffffff;
+  border: 1px solid #dce0f2;
+  cursor: pointer;
+}
+
+.role:hover {
+  border-color: #2434e0;
+}
+
+.roleOn {
+  background: #e8ebff;
+  border: 2px solid #2434e0;
+  padding: 17px 19px;
+}
+
+.roleTitle {
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.roleMeta {
+  font-size: 14px;
+  color: #46507a;
+}
+
+.trackCard {
+  flex: 1;
+  min-width: 0;
+  padding: 28px;
+  background: #ffffff;
+  border: 1px solid #dce0f2;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.trackHead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.trackTitle {
+  margin: 0;
+  font-family: var(--font-unbounded), sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+
+.trackLine {
+  margin: 6px 0 0;
+  color: #46507a;
+  font-size: 16px;
+}
+
+.trackPrice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.trackPriceBig {
+  font-family: var(--font-unbounded), sans-serif;
+  font-weight: 700;
+  font-size: 28px;
+}
+
+.trackPriceNote {
+  font-size: 14px;
+  color: #46507a;
+}
+
+.trackList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trackList li {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 0;
+  border-top: 1px solid #dce0f2;
+  font-size: 16px;
+}
+
+.trackNum {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8ebff;
+  color: #2434e0;
+  font-weight: 700;
+}
+
+.trackCourse {
+  flex: 1;
+  min-width: 0;
+  color: #0a0f2c;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.trackCourse:hover {
+  color: #2434e0;
+  text-decoration: underline;
+}
+
+.trackHours {
+  flex: none;
+  font-size: 14px;
+  color: #46507a;
+}
+
+.trackCoursePrice {
+  flex: none;
+  min-width: 58px;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.trackFoot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding-top: 18px;
+  border-top: 1px solid #dce0f2;
+  font-weight: 700;
+}
+
+/* Top courses */
+.chips {
+  margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chip,
+.chipOn {
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 10px 16px;
+  min-height: 44px;
+  cursor: pointer;
+  border: 1px solid #dce0f2;
+  background: #ffffff;
+  color: #0a0f2c;
+}
+
+.chip:hover {
+  border-color: #2434e0;
+}
+
+.chipOn {
+  background: #0a0f2c;
+  color: #f6f7fb;
+  border-color: #0a0f2c;
+}
+
+.courses {
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.course {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 22px;
+  background: #ffffff;
+  border: 1px solid #dce0f2;
+  color: #0a0f2c;
+  text-decoration: none;
+}
+
+.course:hover {
+  border-color: #2434e0;
+}
+
+.courseTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.courseCat {
+  color: #2434e0;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.price {
+  color: #0a0f2c;
+  white-space: nowrap;
+}
+
+.free {
+  flex: none;
+  align-self: flex-start;
+  background: #ffc933;
+  color: #0a0f2c;
+  padding: 1px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.courseTitle {
+  font-family: var(--font-unbounded), sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.courseMeta {
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: 14px;
+  color: #46507a;
+}
+
+/* Two columns: text and media */
+.split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 56px;
+}
+
+.splitText {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.splitMedia {
+  flex: 1 1 540px;
+  min-width: 0;
+}
+
+.labCounts {
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.labCounts li {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #dce0f2;
+}
+
+.labNum {
+  font-family: var(--font-unbounded), sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+}
+
+.labName {
+  font-size: 15px;
+  color: #46507a;
+}
+
+.video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background: #0a0f2c;
+  border: 1px solid #dce0f2;
+}
+
+/* Certificates */
+.certSteps {
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.certSteps li {
+  display: flex;
+  gap: 14px;
+}
+
+.certSteps li > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.certSteps li > span:last-child > span {
+  font-size: 16px;
+  color: #46507a;
+}
+
+.certNum {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2434e0;
+  color: #f6f7fb;
+  font-weight: 700;
+}
+
+.certImg {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  background: #f6f7fb;
+  border: 1px solid #dce0f2;
+  box-shadow: 0 18px 40px rgba(10, 15, 44, 0.1);
+}
+
+/* Pricing */
+.plans {
+  margin-top: 40px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.plan {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px;
+  background: #ffffff;
+  border: 1px solid #dce0f2;
+}
+
+.plan > a {
+  margin-top: auto;
+}
+
+.planMain {
+  background: #2434e0;
+  border-color: #2434e0;
+  color: #f6f7fb;
+}
+
+.planTag {
+  position: absolute;
+  top: -14px;
+  left: 28px;
+  background: #ffc933;
+  color: #0a0f2c;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 10px;
+}
+
+.planName {
+  font-weight: 700;
+}
+
+.planPrice {
+  font-family: var(--font-unbounded), sans-serif;
+  font-weight: 700;
+  font-size: 40px;
+  letter-spacing: -0.02em;
+}
+
+.planBody {
+  font-size: 16px;
+  color: #46507a;
+  margin-bottom: 8px;
+}
+
+.planMain .planBody {
+  color: #eef0ff;
+}
+
+/* FAQ */
+.faqWrap {
+  max-width: 860px;
+}
+
+.faq {
+  margin-top: 24px;
+}
+
+.faqItem {
+  border-bottom: 1px solid #dce0f2;
+}
+
+.faqQ {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0a0f2c;
+}
+
+.faqQ::-webkit-details-marker {
+  display: none;
+}
+
+.faqQ::after {
+  content: "+";
+  color: #2434e0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.faqItem[open] .faqQ::after {
+  content: "\2212";
+}
+
+.faqA {
+  margin: 0 0 22px;
+  color: #46507a;
+}
+
+/* Final call */
+.final {
+  width: 100%;
+  background: #2434e0;
+  color: #f6f7fb;
+}
+
+.finalWrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 80px 24px;
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 40px;
+}
+
+.finalTitle {
+  margin: 0;
+  max-width: 660px;
+  font-family: var(--font-unbounded), sans-serif;
+  font-weight: 700;
+  font-size: 40px;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.finalLine {
+  margin: 16px 0 0;
+  font-size: 19px;
+  color: #eef0ff;
+}
+
+.finalDot {
+  flex: none;
+  display: inline-flex;
+}
+
+@media (max-width: 900px) {
+  .numbersRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .picker {
+    flex-direction: column;
+  }
+
+  .roles {
+    flex: none;
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-right: -24px;
+    padding-right: 24px;
+  }
+
+  .role,
+  .roleOn {
+    flex: 0 0 220px;
+  }
+
+  .courses {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plans {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
+}
+
+@media (max-width: 640px) {
+  .wrap {
+    padding: 56px 16px;
+  }
+
+  .h2,
+  .finalTitle {
+    font-size: 27px;
+  }
+
+  .line {
+    font-size: 16px;
+  }
+
+  .bigNum {
+    font-size: 28px;
+  }
+
+  .roles {
+    margin-right: -16px;
+    padding-right: 16px;
+  }
+
+  .trackCard {
+    padding: 20px 16px;
+  }
+
+  .trackList li {
+    gap: 10px;
+    font-size: 15px;
+  }
+
+  .trackHours {
+    display: none;
+  }
+
+  .trackFoot a {
+    width: 100%;
+  }
+
+  /* Courses swipe sideways instead of making a very long page. */
+  .chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-right: -16px;
+    padding-right: 16px;
+  }
+
+  .chip,
+  .chipOn {
+    flex: none;
+  }
+
+  .courses {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    margin-right: -16px;
+    padding-right: 16px;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+  }
+
+  .courses > li {
+    flex: 0 0 80%;
+    scroll-snap-align: start;
+  }
+
+  .split {
+    gap: 28px;
+  }
+
+  .finalWrap {
+    padding: 56px 16px;
+  }
+
+  .finalDot svg {
+    width: 110px;
+    height: auto;
+  }
+}

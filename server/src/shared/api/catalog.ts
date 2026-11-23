@@ -1,4 +1,4 @@
-import type { CourseCategory, CoursePricingType, CourseStatus, EnrollmentLifecycle } from "../domain/enums.js";
+import type { CourseCategory, CoursePricingType, CourseStatus, EnrollmentLifecycle, EnrollStatus } from "../domain/enums.js";
 import type { CourseTrack } from "../lib/course-tracks.js";
 import type { SyllabusModule } from "./syllabus.js";
 
@@ -14,6 +14,8 @@ export type CatalogCourseSummary = {
   estimatedHours: number | null;
   /** Catalog grouping shown as tiles: technical courses and soft-skills courses. */
   category: CourseCategory;
+  subcategory: string | null;
+  tags: string[];
   pricingType: CoursePricingType;
   priceCents: number;
   currency: string;
@@ -21,6 +23,9 @@ export type CatalogCourseSummary = {
   instructorName: string | null;
   moduleCount: number;
   chapterCount: number;
+  /** Cached course rating; null until the first review lands. */
+  ratingAverage: number | null;
+  ratingCount: number;
   /** The caller's enrollment lifecycle in this course; null for anonymous visitors. */
   enrollmentLifecycle: EnrollmentLifecycle | null;
 };
@@ -58,11 +63,17 @@ export type CourseOverview = {
     instructorName: string | null;
   };
   access: "active" | "payment_required" | "none";
-  enrollment: { percentComplete: number; chaptersCompleted: number; pendingReviews: number } | null;
+  enrollment: { percentComplete: number; chaptersCompleted: number; pendingReviews: number; status: EnrollStatus } | null;
+  /** The learner's own rating, once submitted. Drives the overview card and edit state. */
+  rating: { rating: number; review: string | null; updatedAt: string } | null;
+  /** The learner dismissed the rating prompt; keep only the small on-demand link. */
+  ratingDismissed: boolean;
   /** Present when an org coupon unlocked or discounted this enrollment. */
   coupon: CourseCouponEntitlement | null;
   /** Variant and specialisation for a course in a family; null otherwise or without access. */
   track: CourseTrack | null;
+  /** True when a newer course release is available for an enrolled learner who finished an earlier version. */
+  curriculumUpgradeAvailable?: boolean;
   /** Present only when access is active. */
   syllabus: {
     modules: SyllabusModule[];
@@ -73,7 +84,23 @@ export type CourseOverview = {
 };
 
 export type Checkout = {
-  course: { id: string; slug: string; title: string; pricingType: CoursePricingType; priceCents: number; currency: string };
+  course: {
+    id: string;
+    slug: string;
+    title: string;
+    description: string | null;
+    coverUrl: string | null;
+    difficulty: string | null;
+    estimatedHours: number | null;
+    projectGoal: string | null;
+    instructorName: string | null;
+    pricingType: CoursePricingType;
+    priceCents: number;
+    currency: string;
+  };
+  automaticDiscount: { percentOff: number; label: string } | null;
+  organizationDiscount: { percentOff: number; label: string; amountDueCents: number } | null;
+  amountDueCents: number;
   enrollment: { id: string; lifecycle: EnrollmentLifecycle } | null;
   state: "no_enrollment" | "payment_required" | "already_paid";
 };
@@ -89,6 +116,9 @@ export const ENROLLMENT_ERROR_CODES = {
   ALREADY_ENROLLED: "ALREADY_ENROLLED",
   PAYMENT_PENDING: "PAYMENT_PENDING",
   NOT_PUBLISHED: "NOT_PUBLISHED",
+  COUPON_INVALID: "COUPON_INVALID",
+  COUPON_EXHAUSTED: "COUPON_EXHAUSTED",
+  COUPON_NOT_APPLICABLE: "COUPON_NOT_APPLICABLE",
 } as const;
 
 /** PUT /api/v1/courses/:courseSlug/track/variant and /track/specialisation */

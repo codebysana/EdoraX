@@ -190,3 +190,69 @@ export async function reinstateUserAction(
     return "Account reinstated.";
   });
 }
+
+/**
+ * Refunds a course paid through Polar, less the fees kept back, and ends the learner's access.
+ * The server works out the amount; this only asks for it.
+ */
+export async function refundEnrollmentAction(_prev: AdminActionState, formData: FormData): Promise<AdminActionState> {
+  const userId = String(formData.get("userId") ?? "");
+  const enrollmentId = String(formData.get("enrollmentId") ?? "");
+  if (!enrollmentId) return { ok: false, message: "Missing enrollment." };
+  return runAdminAction(async () => {
+    await adminCall<void>(`/api/v1/admin/enrollments/${encodeURIComponent(enrollmentId)}/refund`, {
+      method: "POST",
+      json: { reason: "customer_request" },
+    });
+    if (userId) revalidatePath(`/admin/users/${userId}`);
+    revalidatePath("/admin/users");
+    revalidatePath("/admin/course-access");
+    revalidatePath("/admin/audit");
+    return "Refund sent through Polar and course access removed.";
+  });
+}
+
+/** Removes an enrollment from a user account. */
+export async function removeUserEnrollmentAction(
+  _prev: AdminActionState,
+  formData: FormData
+): Promise<AdminActionState> {
+  const userId = String(formData.get("userId") ?? "");
+  const enrollmentId = String(formData.get("enrollmentId") ?? "");
+  if (!enrollmentId) return { ok: false, message: "Missing enrollment." };
+  return runAdminAction(async () => {
+    const endpoint = userId
+      ? `/api/v1/admin/users/${encodeURIComponent(userId)}/enrollments/${encodeURIComponent(enrollmentId)}`
+      : `/api/v1/admin/enrollments/${encodeURIComponent(enrollmentId)}`;
+    await adminCall<void>(endpoint, { method: "DELETE" });
+    if (userId) revalidatePath(`/admin/users/${userId}`);
+    revalidatePath("/admin/users");
+    revalidatePath("/admin/courses");
+    revalidatePath("/admin/course-access");
+    revalidatePath("/admin/audit");
+    return "Enrollment removed.";
+  });
+}
+
+/** Enrolls a user into a course by admin. */
+export async function enrollUserInCourseAction(
+  _prev: AdminActionState,
+  formData: FormData
+): Promise<AdminActionState> {
+  const userId = String(formData.get("userId") ?? "");
+  const courseId = String(formData.get("courseId") ?? "");
+  if (!userId) return { ok: false, message: "Missing user." };
+  if (!courseId) return { ok: false, message: "Select a course." };
+  return runAdminAction(async () => {
+    await adminCall<{ id: string }>(`/api/v1/admin/users/${encodeURIComponent(userId)}/enroll`, {
+      method: "POST",
+      json: { courseId },
+    });
+    revalidatePath(`/admin/users/${userId}`);
+    revalidatePath("/admin/users");
+    revalidatePath("/admin/courses");
+    revalidatePath("/admin/course-access");
+    revalidatePath("/admin/audit");
+    return "User enrolled in course.";
+  });
+}

@@ -5,11 +5,12 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRight, Volume2, VolumeX, X } from "lucide-react";
 import type { MascotReaction } from "@/shared/engagement/engine";
-import { useDotVoice } from "@/lib/engagement/dot-voice";
+import { playDotVoice, useDotVoice } from "@/lib/engagement/dot-voice";
 import { useMascotReactions } from "@/lib/engagement/use-mascot";
 import { requestAskHelp } from "@/lib/engagement/ask-help";
 import { Dot } from "@/components/brand/dot";
 import { dotMoodForState } from "@/components/mascot/dot-mood";
+import { cn } from "@/lib/utils";
 
 // The one place mascot reactions are drawn. Everything above it (rules, cooldowns, which mascot
 // plays which role) lives in shared/engagement; swapping the drawing for a Rive animation later
@@ -140,7 +141,9 @@ function ReactionBubble({
         <Dot mood={dotMoodForState(reaction.state)} size={72} />
       </div>
       <div
-        className={`relative mb-2 border border-border bg-card py-2.5 pl-3.5 text-base font-medium text-card-foreground ${reaction.voice ? "pr-18" : "pr-10"}`}
+        className={cn(
+          "relative mb-2 border border-border bg-card py-2.5 pl-3.5 pr-24 text-base font-medium text-card-foreground"
+        )}
       >
         {/* The full line reserves the bubble's size so it does not grow while typing. */}
         <span aria-hidden className="grid">
@@ -178,19 +181,18 @@ function ReactionBubble({
             ) : null}
           </span>
         ) : null}
-        <div className="absolute right-1.5 top-1.5 flex">
-          {reaction.voice ? (
-            <button
-              type="button"
-              onClick={onToggleVoice}
-              aria-label={voiceOn ? "Turn off Dot's voice" : "Turn on Dot's voice"}
-              aria-pressed={voiceOn}
-              className={BUBBLE_BUTTON}
-            >
-              {voiceOn ? <Volume2 className="size-3.5" aria-hidden /> : <VolumeX className="size-3.5" aria-hidden />}
-            </button>
-          ) : null}
-          <button type="button" onClick={onDismiss} aria-label="Dismiss" className={BUBBLE_BUTTON}>
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={onToggleVoice}
+            aria-label={voiceOn ? "Turn off Dot's voice" : "Turn on Dot's voice"}
+            aria-pressed={voiceOn}
+            title={voiceOn ? "Turn off Dot's voice" : "Turn on Dot's voice"}
+            className={cn(BUBBLE_BUTTON, voiceOn && "bg-primary/10 text-primary")}
+          >
+            {voiceOn ? <Volume2 className="size-3.5" aria-hidden /> : <VolumeX className="size-3.5" aria-hidden />}
+          </button>
+          <button type="button" onClick={onDismiss} aria-label="Dismiss" title="Dismiss" className={BUBBLE_BUTTON}>
             <X className="size-3.5" aria-hidden />
           </button>
         </div>
@@ -233,25 +235,18 @@ export function MascotPlayer() {
   }, [held]);
 
   // Speak the line once while its bubble is up; closing the bubble or turning the voice off stops it.
-  // A browser that blocks playback (no gesture yet) just leaves the words on screen.
-  const voice = voiceOn ? shown?.reaction.voice : undefined;
+  // Plays Dot's recorded clip only; a missing clip never uses browser speech synthesis.
   useEffect(() => {
-    if (!voice) return;
-    const audio = new Audio(voice);
-    const start = () => setSpeaking(true);
-    const done = () => setSpeaking(false);
-    audio.addEventListener("playing", start);
-    audio.addEventListener("ended", done);
-    audio.addEventListener("error", done);
-    audio.play().catch(done);
+    if (!voiceOn || !shown) return;
+    const cleanup = playDotVoice(shown.reaction.voice, {
+      onStart: () => setSpeaking(true),
+      onEnd: () => setSpeaking(false),
+    });
     return () => {
-      audio.removeEventListener("playing", start);
-      audio.removeEventListener("ended", done);
-      audio.removeEventListener("error", done);
-      audio.pause();
+      cleanup();
       setSpeaking(false);
     };
-  }, [voice, shown?.seq]);
+  }, [voiceOn, shown?.seq]);
 
   // Count down only while nothing modal is open, Dot is not speaking and the learner is not hovering the bubble.
   useEffect(() => {

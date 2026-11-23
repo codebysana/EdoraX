@@ -84,6 +84,15 @@ enum VariantAssignment {
 enum CourseCategory {
   TECH
   SOFT_SKILLS
+  CLOUD_DEVOPS
+}
+
+enum DiscountTargetScope {
+  ALL
+  CATEGORY
+  SUBCATEGORY
+  TAG
+  SELECTED_COURSES
 }
 
 enum CourseInstructorRole {
@@ -132,6 +141,24 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum InstructorPayoutStatus {
+  NOT_DUE
+  PENDING
+  PAID
+}
+
+enum InstructorWithdrawalStatus {
+  REQUESTED
+  PAID
+  REJECTED
+}
+
+enum OrganizationCreditTransactionStatus {
+  RESERVED
+  COMMITTED
+  RELEASED
+}
+
 /// Org coupon seat that has been reserved for a learner (mentor assign / Pathment enroll).
 enum CouponUsageStatus {
   ISSUED
@@ -161,6 +188,7 @@ enum BlockType {
   VISUAL_DIAGRAM
   ROADMAP
   AI_INTERVIEW
+  CAPSTONE_CHECK
 }
 
 enum ResponseStatus {
@@ -212,6 +240,11 @@ enum LeagueTier {
   SILVER
   GOLD
   PLATINUM
+  COBALT
+  JADE
+  QUARTZ
+  AURORA
+  ZENITH
   DIAMOND
 }
 
@@ -251,11 +284,17 @@ model User {
   weeklyGoalNote String? @db.VarChar(240)
   weeklyGoalReminderEnabled Boolean @default(false)
   weeklyGoalReminderSentOn DateTime? @db.Date
+  /// Local calendar day the learner last dismissed the daily streak popup.
+  streakPopupSeenOn DateTime? @db.Date
   celebratedStreakMilestones Int[] @default([])
   /// Cached sum of XpEntry.amount; the ledger is the source of truth.
   xpTotal       Int          @default(0)
   /// Cached build-credit balance; the CreditEntry ledger is the source of truth.
   buildCredits  Int          @default(0)
+  /// The equipped reward cosmetic applied to the mascot; must be owned.
+  activeCosmetic String?
+  /// A purchased "session XP boost" is active until this instant (XP ×2 while active).
+  xpBoostUntil DateTime?
   /// Streak freezes held, 0..2 (shared/lib/streak.ts MAX_STREAK_FREEZES).
   streakFreezes Int          @default(0)
   /// "Hide game elements": no XP, levels, freezes or leaderboards shown, and off every board.
@@ -265,27 +304,38 @@ model User {
   leagueTier         LeagueTier @default(BRONZE)
   /// Highest career tier reached, permanently (never demotes). Advanced on verified mastery.
   careerTier         CareerTier @default(INTERN)
+  /// Public Career Identity page: opt-in switch + unique handle used at /u/<slug>. Null until set.
+  profilePublic      Boolean    @default(false)
+  publicSlug         String?    @unique
   createdAt     DateTime     @default(now())
   accounts      Account[]
   sessions      Session[]
   profile       UserProfile?
   learnerProfile LearnerProfile?
   coursesOwned  Course[]     @relation("CourseMentor")
+  instructorCouponsCreated InstructorCoupon[] @relation("InstructorCouponCreator")
+  discountCampaignsCreated CourseDiscountCampaign[]
+  instructorCouponRedemptions InstructorCouponRedemption[]
   courseMemberships CourseInstructor[]
   courseInstructorInvitesSent CourseInstructorInvite[] @relation("CourseInstructorInviteSender")
   enrollments   Enrollment[]
+  courseRatings CourseRating[]
   responses     Response[]
   reviewsGiven          Review[]       @relation("Reviewer")
   invitesSent           Invite[]       @relation("InviteSender")
   helpThreadsAsked      HelpThread[]   @relation("HelpThreadsAsked")
   helpMessagesAuthored  HelpMessage[]  @relation("HelpMessagesAuthored")
   headingNotes          HeadingNote[]
+  highlights            ChapterHighlight[]
   organizationCourseRequestsReviewed OrganizationCourseRequest[] @relation("OrgCourseRequestReviewer")
   instructorAccessRequest       InstructorAccessRequest?
   instructorAccessReviews       InstructorAccessRequest[] @relation("InstructorAccessReviewer")
   aiCredential                  AiCredential?
   aiInterviewSessions           AiInterviewSession[]
   learnerQuestions              LearnerQuestion[]
+  capstoneChecks                CapstoneCheck[]
+  shellLabProgress              ShellLabProgress[]
+  certificates                  Certificate[]
   appActivity                   UserAppActivity?
   appActivityDays               AppActivityDay[]
   notifications                 Notification[]
@@ -293,6 +343,7 @@ model User {
   emailOutbox                   EmailOutbox[]
   studyReminders                StudyReminderLog[]
   engagementEvents              EngagementEvent[]
+  desktopUpdatePolicies         DesktopUpdatePolicy[]
   xpEntries                     XpEntry[]
   streakFreezeDays              StreakFreezeDay[]
   leaderboardMemberships        LeaderboardMember[]
@@ -300,6 +351,9 @@ model User {
   leaguePlacements              LeaguePlacement[]
   couponUsages                  CouponUsage[]
   creditEntries                 CreditEntry[]
+  unlockedCosmetics             UnlockedCosmetic[]
+  rewardInventory               RewardInventory[]
+  instructorWithdrawals         InstructorWithdrawal[]
 }
 
 /// A learner's own AI provider key for AI interviews. Only the AES-256-GCM
@@ -370,6 +424,10 @@ model UserProfile {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   timezone  String   @default("UTC")
   skills    String[] @default([])
+  /// One-line profile headline shown on the Career Identity page (e.g. "Backend Engineering · Learning in public").
+  headline         String?
+  /// Appends " · Learning in public" to the headline on the public page.
+  learningInPublic Boolean @default(false)
   updatedAt DateTime @updatedAt
 }
 
@@ -393,16 +451,26 @@ model Course {
   difficulty     String?
   estimatedHours Int?
   category       CourseCategory @default(TECH)
+  subcategory    String?
+  tags           String[]       @default([])
   status         CourseStatus @default(DRAFT)
   pricingType    CoursePricingType @default(FREE)
   priceCents     Int          @default(0)
   currency       String       @default("USD")
+  /// The course's Polar product, created on its first paid checkout. Null until then.
+  polarProductId String?      @unique
+  /// Global instructor share used by the financial calculator.
+  instructorPayoutPercent Int  @default(70)
   sequential     Boolean      @default(true)
   /// When true, text open questions grade instantly with the learner's OpenRouter key instead of the mentor queue.
   autoGradeOpenQuestions Boolean @default(false)
   familySlug     String? // course family in src/shared/lib/course-tracks.ts; null = no variants
   variantFamily  Json? // creator-defined variant catalog; null uses a built-in family
   assistant      Json? // tutor settings from course.yaml (effort, guidance, starters); null means defaults
+  certificate    Json? // certificate settings from course.yaml (program, title, code, skills); null means no certificate
+  /// The certificate design an instructor picked in course settings. Wins over `certificate.template`; null uses it or the default.
+  certificateTemplate String?
+  certificates   Certificate[]
   availableVariantSlugs String[] @default([]) // empty means every family variant is available
   variantAssignment VariantAssignment @default(SELF_SELECT)
   activeReleaseId String? // latest approved content release; set atomically with publication
@@ -423,11 +491,17 @@ model Course {
   chapterDrafts  CourseChapterDraft[]
   enrollments    Enrollment[]
   organizationCourses OrganizationCourse[]
+  organizationFreeAccesses CourseOrganizationAccess[]
   organizationCourseRequests OrganizationCourseRequest[]
   couponPools    OrganizationCouponPool[]
   couponUsages   CouponUsage[]
+  instructorCoupons InstructorCoupon[]
   invites        Invite[]
   helpThreads    HelpThread[]
+  ratings        CourseRating[]
+  /// Cached aggregate of CourseRating, maintained on every write so catalog cards stay one query.
+  ratingAverage  Float?
+  ratingCount    Int          @default(0)
   publishedAt    DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -435,6 +509,25 @@ model Course {
   @@index([mentorId, status])
   leaderboardGroups     LeaderboardGroup[]
   leaderboardPlacements LeaderboardPlacement[]
+}
+
+/// One learner's rating of a completed course. Editable, never duplicated.
+model CourseRating {
+  id        String   @id @default(cuid())
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 1–5 stars.
+  rating    Int
+  /// Optional written review. Public when present.
+  review    String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([courseId, userId])
+  @@index([courseId, createdAt])
+  @@index([userId])
 }
 
 model CreditEntry {
@@ -449,6 +542,33 @@ model CreditEntry {
 
   @@unique([userId, sourceKey])
   @@index([userId, createdAt])
+}
+
+model UnlockedCosmetic {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Reward id from shared/gamification/rewards.ts.
+  cosmetic  String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, cosmetic])
+  @@index([userId])
+}
+
+/// Quantities of consumable rewards (league shields, session XP boosts) the learner holds.
+/// Permanent cosmetic unlocks live in `UnlockedCosmetic` instead; only consumables count here.
+model RewardInventory {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Reward id from shared/gamification/rewards.ts (kind: "consumable").
+  rewardId  String
+  /// Number held; 0 rows are pruned on use.
+  quantity  Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, rewardId])
+  @@index([userId])
 }
 
 model CourseInstructor {
@@ -526,6 +646,7 @@ model Chapter {
   helpThreads       HelpThread[]
   studySessions     StudySession[]
   headingNotes      HeadingNote[]
+  highlights        ChapterHighlight[]
   integrityAttempts IntegrityAttempt[]
   releaseDraft CourseChapterDraft?
 
@@ -605,6 +726,7 @@ model Block {
   responses  Response[]
   stats      BlockStats?
   aiInterviewSessions AiInterviewSession[]
+  capstoneChecks CapstoneCheck[]
 
   @@index([chapterId, order])
 }
@@ -635,6 +757,9 @@ model Enrollment {
   lastNudgeSentAt   DateTime?
   startedAt         DateTime?
   completedAt       DateTime?
+  /// Set when the learner dismisses the post-completion rating prompt. Keeps
+  /// the one-time ask from reappearing; the course page keeps a small link.
+  ratingDismissedAt DateTime?
   variantSlug       String? // learner's variant in the course family; null = not picked yet
   variantChosenAt   DateTime?
   variantLockedAt   DateTime? // first chapter start fixes the learner's variant
@@ -645,12 +770,16 @@ model Enrollment {
   specialisationChosenAt DateTime?
   createdAt         DateTime          @default(now())
   chapterProgress   ChapterProgress[]
+  highlights        ChapterHighlight[]
   dailyActivity     DailyActivity[]
   studySessions     StudySession[]
   integrityAttempts IntegrityAttempt[]
   payment           Payment?
+  instructorCouponRedemption InstructorCouponRedemption?
   xpEntries         XpEntry[]
   couponUsage       CouponUsage?
+  organizationCreditTransaction OrganizationCreditTransaction?
+  certificate       Certificate?
 
   @@unique([courseId, userId])
   @@unique([courseId, learnerProfileId])
@@ -672,6 +801,37 @@ model Organization {
   enrollments     Enrollment[]
   couponPools     OrganizationCouponPool[]
   couponUsages    CouponUsage[]
+  freeCourseAccesses CourseOrganizationAccess[]
+  creditBalance   Int                     @default(0)
+  creditTransactions OrganizationCreditTransaction[]
+}
+
+/// Platform-admin-controlled allow-list for organizations that receive a paid course at no charge.
+model CourseOrganizationAccess {
+  courseId       String
+  organizationId String
+  course         Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@id([courseId, organizationId])
+  @@index([organizationId])
+}
+
+/// Append-only organization credit movement linked to the enrollment it funds.
+model OrganizationCreditTransaction {
+  id            String                              @id @default(cuid())
+  organizationId String
+  organization  Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  enrollmentId  String                              @unique
+  enrollment    Enrollment                          @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  amountCredits Int
+  status        OrganizationCreditTransactionStatus @default(RESERVED)
+  createdAt     DateTime                            @default(now())
+  committedAt   DateTime?
+  releasedAt    DateTime?
+
+  @@index([organizationId, status])
 }
 
 /// Limited coupon seats an organization can grant for one course, or for any allocated course
@@ -699,8 +859,74 @@ model OrganizationCouponPool {
   @@index([organizationId, code])
 }
 
+/// Course-specific percentage coupons and automatic discounts created by instructors or admins.
+model InstructorCoupon {
+  id              String       @id @default(cuid())
+  courseId        String
+  course          Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdById     String
+  createdBy       User         @relation("InstructorCouponCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  code            String?
+  label           String
+  percentOff      Int          @default(100)
+  autoApply       Boolean      @default(false)
+  maxRedemptions  Int
+  redemptionCount Int          @default(0)
+  active          Boolean      @default(true)
+  expiresAt       DateTime?
+  campaignId      String?
+  campaign        CourseDiscountCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  redemptions     InstructorCouponRedemption[]
+
+  @@unique([courseId, code])
+  @@index([courseId, active])
+}
+
+/// Admin-owned discount campaigns can target a category, subcategory, tag, selected courses, or all paid courses.
+model CourseDiscountCampaign {
+  id              String              @id @default(cuid())
+  createdById     String
+  createdBy       User                @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  label           String
+  code            String?             @unique
+  scope           DiscountTargetScope
+  category        CourseCategory?
+  subcategory     String?
+  tag             String?
+  courseIds       String[]            @default([])
+  percentOff      Int
+  maxRedemptions  Int
+  redemptionCount Int                 @default(0)
+  autoApply       Boolean             @default(false)
+  active          Boolean             @default(true)
+  expiresAt       DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  coupons         InstructorCoupon[]
+
+  @@index([active, scope])
+  @@index([category, active])
+  @@index([subcategory, active])
+}
+
+model InstructorCouponRedemption {
+  id          String          @id @default(cuid())
+  couponId    String
+  coupon      InstructorCoupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  enrollmentId String         @unique
+  enrollment  Enrollment      @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  percentOff  Int
+  redeemedAt  DateTime        @default(now())
+
+  @@index([couponId, redeemedAt])
+}
+
 /// One reserved seat from a pool, created when a mentor/Pathment assigns the course.
-/// Marked redeemed when the learner first opens the course (banner + audit).
+/// Marked redeemed when access is granted (immediately for full discounts, after manual approval for partial discounts).
 model CouponUsage {
   id             String            @id @default(cuid())
   poolId         String
@@ -785,9 +1011,46 @@ model Payment {
   status       PaymentStatus @default(PENDING)
   provider     String?
   providerRef  String?
+  originalAmountCents Int               @default(0)
+  discountAmountCents Int                  @default(0)
+  organizationContributionCents Int         @default(0)
+  learnerAmountCents Int                @default(0)
+  instructorPayoutPercent Int               @default(0)
+  platformRevenueCents Int                  @default(0)
+  fundingSource String?
   paidAt       DateTime?
+  instructorShareCents Int   @default(0)
+  instructorPayoutStatus InstructorPayoutStatus @default(NOT_DUE)
+  instructorPayoutPaidAt DateTime?
+  /// Set while these earnings are reserved by a withdrawal request, and kept after that request is paid.
+  payoutWithdrawalId String?
+  payoutWithdrawal   InstructorWithdrawal? @relation(fields: [payoutWithdrawalId], references: [id], onDelete: SetNull)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+
+  @@index([instructorPayoutStatus, status])
+  @@index([payoutWithdrawalId])
+}
+
+/// Instructor request to be paid the earnings already calculated on Payment rows.
+model InstructorWithdrawal {
+  id           String                      @id @default(cuid())
+  instructorId String
+  instructor   User                        @relation(fields: [instructorId], references: [id], onDelete: Cascade)
+  amountCents  Int
+  currency     String                      @default("USD")
+  status       InstructorWithdrawalStatus  @default(REQUESTED)
+  /// Where the instructor asked to receive the transfer.
+  note         String                      @db.VarChar(240)
+  /// Payment ids included when the request was created. Kept after a rejection.
+  paymentIds   String[]
+  requestedAt  DateTime                    @default(now())
+  resolvedAt   DateTime?
+  resolvedById String?
+  payments     Payment[]
+
+  @@index([instructorId, status])
+  @@index([status, requestedAt])
 }
 
 /// Denormalized daily study seconds — updated on heartbeat, not aggregated from Response.
@@ -1100,6 +1363,7 @@ model Response {
   startedAt    DateTime?
   submittedAt  DateTime       @default(now())
   review       Review?
+  capstoneCheck CapstoneCheck?
 
   @@index([blockId, userId, attempt])
   @@index([enrollmentId])
@@ -1120,6 +1384,20 @@ model Review {
 }
 
 // Mentee help requests — separate from the open-question review queue (demo Day 3).
+enum HelpThreadKind {
+  QUESTION
+  LESSON_REPORT
+}
+
+enum HelpThreadCategory {
+  ERROR
+  TYPO
+  CONFUSING
+  BROKEN_LINK
+  SUGGESTION
+  OTHER
+}
+
 model HelpThread {
   id         String           @id @default(cuid())
   courseId   String
@@ -1129,6 +1407,13 @@ model HelpThread {
   menteeId   String
   mentee     User             @relation("HelpThreadsAsked", fields: [menteeId], references: [id], onDelete: Cascade)
   status     HelpThreadStatus @default(OPEN)
+  // A question is a conversation the learner starts with the mentor. A lesson
+  // report is the same thread machinery, tagged with a category and an optional
+  // block/quote so the instructor can find the exact passage that is wrong.
+  kind       HelpThreadKind     @default(QUESTION)
+  category   HelpThreadCategory?
+  blockId    String?
+  quote      String?            @db.Text
   menteeLastReadAt DateTime?
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
@@ -1138,6 +1423,7 @@ model HelpThread {
   @@index([courseId, status, updatedAt])
   @@index([menteeId, updatedAt])
   @@index([chapterId, menteeId])
+  @@index([courseId, kind, status])
 }
 
 model HelpMessage {
@@ -1174,6 +1460,36 @@ model HeadingNote {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, chapterId, headingId])
+  @@index([chapterId])
+}
+
+enum HighlightColor {
+  YELLOW
+  GREEN
+  BLUE
+  PINK
+}
+
+model ChapterHighlight {
+  id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enrollmentId String
+  enrollment   Enrollment     @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  chapterId    String
+  chapter      Chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  color        HighlightColor @default(YELLOW)
+  quote        String         @db.Text
+  prefix       String?        @db.Text
+  suffix       String?        @db.Text
+  occurrence   Int            @default(0)
+  note         String?        @db.Text
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([userId, chapterId, quote, occurrence])
+  @@index([userId, createdAt])
+  @@index([enrollmentId, chapterId])
   @@index([chapterId])
 }
 
@@ -1379,4 +1695,157 @@ model LearnerQuestion {
 
   @@index([createdAt])
   @@index([userId, createdAt])
+}
+
+enum CapstoneCheckStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+/// One run of a CAPSTONE_CHECK block (docs/16-capstone-checker-and-certificates.mdx).
+/// Automated checks run first; the AI grade runs only when the hard gates pass.
+/// A DONE check creates the PENDING_REVIEW Response a mentor confirms or overrides.
+model CapstoneCheck {
+  id           String              @id @default(cuid())
+  blockId      String
+  block        Block               @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enrollmentId String
+  responseId   String?             @unique
+  response     Response?           @relation(fields: [responseId], references: [id], onDelete: SetNull)
+  attempt      Int
+  status       CapstoneCheckStatus @default(QUEUED)
+  repoUrl      String
+  liveUrl      String?
+  commitSha    String?             @db.VarChar(64)
+  packId       String              @db.VarChar(80)
+  packVersion  Int
+  /// AutomatedCheckResult[] in the order the pack lists them.
+  automated    Json?
+  /// CapstoneReport: the recomputed grade, criteria, what is left and quality notes.
+  report       Json?
+  percent      Int?
+  completed    Boolean?
+  /// Set when the same commit and pack version were already graded; no model call was made.
+  reusedFromId String?
+  /// True once the platform-wide daily model budget was reserved for this check.
+  aiCalled     Boolean             @default(false)
+  model        String?             @db.VarChar(120)
+  inputTokens  Int                 @default(0)
+  outputTokens Int                 @default(0)
+  costMicroUsd Int                 @default(0)
+  error        String?             @db.Text
+  createdAt    DateTime            @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  @@index([blockId, userId, createdAt])
+  @@index([status, createdAt])
+  @@index([aiCalled, createdAt])
+}
+
+/// A completion certificate for a passed track. The code is the public id on /verify/<code>.
+/// Names and titles are snapshots so a later course rename never changes an issued certificate.
+model Certificate {
+  id            String     @id @default(cuid())
+  code          String     @unique @db.VarChar(32)
+  userId        String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId      String
+  course        Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  enrollmentId  String     @unique
+  enrollment    Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  recipientName String
+  program       String
+  title         String
+  /// The design the certificate was issued with (CERTIFICATE_TEMPLATES). A later change to the course does not restyle it.
+  template      String     @default("edorax")
+  issuerName    String
+  issuerTitle   String?
+  skills        String[]   @default([])
+  /// [{ chapterTitle, repoUrl, liveUrl, commitSha, percent }] for the confirmed capstones.
+  evidence      Json?
+  issuedAt      DateTime   @default(now())
+  revokedAt     DateTime?
+  revokedReason String?
+  revokedById   String?
+
+  @@index([userId])
+  @@index([courseId])
+}
+
+/// A hands-on shell lab served to the desktop app. Authored as YAML in the private
+/// content repository (labs/shell) and published with `pnpm labs:publish`.
+/// `data` holds the whole lab (checks and solutions included): the app runs the checks.
+/// A lab dropped from index.yaml is kept with active=false, never deleted.
+model ShellLab {
+  slug        String   @id
+  topic       String
+  level       String
+  title       String
+  summary     String
+  minutes     Int
+  /// Order in index.yaml.
+  position    Int
+  active      Boolean  @default(true)
+  /// sha256 of the canonical JSON of `data`.
+  contentHash String
+  data        Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active, position])
+  @@map("shell_labs")
+}
+
+/// The steps a learner has passed in one shell lab. Kept on the account so progress follows the
+/// learner to a new computer or a reinstall. Step ids come from the lab's own YAML.
+model ShellLabProgress {
+  userId    String
+  labSlug   String
+  steps     String[]
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, labSlug])
+  @@map("shell_lab_progress")
+}
+
+enum DesktopPlatform {
+  DARWIN
+  WIN32
+  LINUX
+}
+
+/// Forced-update policy of the desktop app for one platform, managed by platform admins.
+/// A platform without a row uses the default policy from the DESKTOP_* environment variables.
+model DesktopUpdatePolicy {
+  id              String          @id @default(cuid())
+  platform        DesktopPlatform @unique
+  /// Plain semver. The app must run at least this version.
+  minimumVersion  String
+  latestVersion   String
+  downloadUrl     String
+  message         String          @default("")
+  /// Exact versions that are refused even when they are above the minimum.
+  blockedVersions String[]        @default([])
+  updatedAt       DateTime        @updatedAt
+  updatedById     String?
+  updatedBy       User?           @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("desktop_update_policies")
+}
+
+/// Generic key-value store for platform-wide settings editable by admins.
+/// Each row holds one JSON-encoded value identified by a stable string key.
+model AppSetting {
+  key       String   @id @db.VarChar(80)
+  /// JSON-encoded value. The shape is key-specific and validated in the service layer.
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
 }

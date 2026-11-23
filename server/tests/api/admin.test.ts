@@ -103,7 +103,7 @@ describe("organizations", () => {
     const ok = await request(app)
       .put(`/api/v1/admin/organizations/${createdOrgId}/allocations`)
       .set(admin())
-      .send({ isAllowed: true, courses: [{ courseId: fx.course.id, maxEnrollments: 25, expiresAt: "2030-01-31" }] });
+      .send({ courses: [{ courseId: fx.course.id, maxEnrollments: 25, expiresAt: "2030-01-31" }] });
     expect(ok.status).toBe(204);
 
     const detail = await request(app).get(`/api/v1/admin/organizations/${createdOrgId}`).set(admin());
@@ -118,6 +118,39 @@ describe("organizations", () => {
       .send({ isAllowed: true, courses: [{ courseId: "nope", maxEnrollments: 1 }] });
     expect(bad.status).toBe(422);
     expect(bad.body.code).toBe("COURSE_NOT_PUBLISHED");
+  });
+
+  it("turns integration enrollments off and back on for a single allocation", async () => {
+    await request(app)
+      .put(`/api/v1/admin/organizations/${createdOrgId}/allocations`)
+      .set(admin())
+      .send({ isAllowed: true, courses: [{ courseId: fx.course.id, maxEnrollments: 25 }] });
+
+    const url = `/api/v1/admin/organizations/${createdOrgId}/allocations/${fx.course.id}/allowed`;
+    const key = { organizationId_courseId: { organizationId: createdOrgId, courseId: fx.course.id } };
+
+    const off = await request(app).patch(url).set(admin()).send({ enabled: false });
+    expect(off.status).toBe(204);
+    expect(await prisma.organizationCourse.findUnique({ where: key })).toMatchObject({ isAllowed: false, maxEnrollments: 25 });
+
+    // Editing the catalog without specifying assignability must preserve an explicit opt-out.
+    const edit = await request(app)
+      .put(`/api/v1/admin/organizations/${createdOrgId}/allocations`)
+      .set(admin())
+      .send({ courses: [{ courseId: fx.course.id, maxEnrollments: 30 }] });
+    expect(edit.status).toBe(204);
+    expect(await prisma.organizationCourse.findUnique({ where: key })).toMatchObject({ isAllowed: false, maxEnrollments: 30 });
+
+    const on = await request(app).patch(url).set(admin()).send({ enabled: true });
+    expect(on.status).toBe(204);
+    expect(await prisma.organizationCourse.findUnique({ where: key })).toMatchObject({ isAllowed: true, maxEnrollments: 30 });
+
+    // An allocation that does not exist is a 404, not a silent no-op.
+    const missing = await request(app)
+      .patch(`/api/v1/admin/organizations/${createdOrgId}/allocations/${org.organization.id}/allowed`)
+      .set(admin())
+      .send({ enabled: true });
+    expect(missing.status).toBe(404);
   });
 });
 
@@ -554,6 +587,120 @@ describe("user detail and account actions", () => {
       (await request(app).post(`/api/v1/admin/users/${fx.learner.id}/revoke-sessions`).set(await mentor())).status
     ).toBe(403);
   });
+
+  it("excludes pending-payment and rejected enrollments from user lists and detail until payment or admin enrollment succeeds", async () => {
+    const paidCourse = await prisma.course.create({
+      data: {
+        slug: `paid-enr-${fx.tag}`,
+        title: "Paid Enrollment Course",
+        status: "PUBLISHED",
+        pricingType: "PAID",
+        priceCents: 2500,
+        currency: "USD",
+        mentorId: fx.mentor.id,
+        publishedAt: new Date(),
+      },
+    });
+    const buyer = await prisma.user.create({
+      data: {
+        email: `buyer-${fx.tag}@test.local`,
+        name: "Pending Buyer",
+        role: "MENTEE",
+        emailVerified: new Date(),
+      },
+    });
+    createdUserIds.push(buyer.id);
+
+    try {
+      const pendingEnrollment = await prisma.enrollment.create({
+        data: {
+          courseId: paidCourse.id,
+          userId: buyer.id,
+          source: "SELF",
+          lifecycle: "PAYMENT_REQUIRED",
+          status: "ASSIGNED",
+          payment: {
+            create: {
+              amountCents: 2500,
+              currency: "USD",
+              status: "PENDING",
+            },
+          },
+        },
+      });
+
+      // 1. Under payment: excluded from user list count, enrolled filter, course count, and user detail.
+      const listWhilePending = await request(app)
+        .get("/api/v1/admin/users")
+        .query({ query: buyer.email })
+        .set(admin());
+      expect(listWhilePending.body.data.users[0]).toMatchObject({ id: buyer.id, enrollmentCount: 0 });
+
+      const enrolledOnlyWhilePending = await request(app)
+        .get("/api/v1/admin/users")
+        .query({ query: buyer.email, enrolled: "true" })
+        .set(admin());
+      expect(enrolledOnlyWhilePending.body.data.users).toHaveLength(0);
+
+      const detailWhilePending = await request(app).get(`/api/v1/admin/users/${buyer.id}`).set(admin());
+      expect(detailWhilePending.body.data.user.enrollmentCount).toBe(0);
+      expect(detailWhilePending.body.data.enrollments).toEqual([]);
+
+      // 2. Rejected payment: still excluded everywhere.
+      const rejectRes = await request(app)
+        .post(`/api/v1/admin/manual-access/${pendingEnrollment.id}/reject`)
+        .set(admin());
+      expect(rejectRes.status).toBe(200);
+
+      const detailAfterReject = await request(app).get(`/api/v1/admin/users/${buyer.id}`).set(admin());
+      expect(detailAfterReject.body.data.user.enrollmentCount).toBe(0);
+      expect(detailAfterReject.body.data.enrollments).toEqual([]);
+
+      // 3. Admin enrolls the user: upgrades to ACTIVE + SUCCEEDED and now counts as a positive enrollment.
+      const enrollRes = await request(app)
+        .post(`/api/v1/admin/users/${buyer.id}/enroll`)
+        .set(admin())
+        .send({ courseId: paidCourse.id });
+      expect(enrollRes.status).toBe(201);
+
+      const enrolledOnlyAfterSuccess = await request(app)
+        .get("/api/v1/admin/users")
+        .query({ query: buyer.email, enrolled: "true" })
+        .set(admin());
+      expect(enrolledOnlyAfterSuccess.body.data.users).toHaveLength(1);
+      expect(enrolledOnlyAfterSuccess.body.data.users[0]).toMatchObject({ id: buyer.id, enrollmentCount: 1 });
+
+      const detailAfterSuccess = await request(app).get(`/api/v1/admin/users/${buyer.id}`).set(admin());
+      expect(detailAfterSuccess.body.data.user.enrollmentCount).toBe(1);
+      expect(detailAfterSuccess.body.data.enrollments).toHaveLength(1);
+      expect(detailAfterSuccess.body.data.enrollments[0]).toMatchObject({
+        id: pendingEnrollment.id,
+        courseId: paidCourse.id,
+        lifecycle: "ACTIVE",
+      });
+
+      // Duplicate enroll is rejected with ALREADY_ENROLLED.
+      const dupRes = await request(app)
+        .post(`/api/v1/admin/users/${buyer.id}/enroll`)
+        .set(admin())
+        .send({ courseId: paidCourse.id });
+      expect(dupRes.status).toBe(409);
+      expect(dupRes.body.code).toBe("ALREADY_ENROLLED");
+
+      // 4. Admin removes the enrollment: disappears cleanly.
+      const removeRes = await request(app)
+        .delete(`/api/v1/admin/users/${buyer.id}/enrollments/${pendingEnrollment.id}`)
+        .set(admin());
+      expect(removeRes.status).toBe(204);
+
+      const detailAfterRemove = await request(app).get(`/api/v1/admin/users/${buyer.id}`).set(admin());
+      expect(detailAfterRemove.body.data.user.enrollmentCount).toBe(0);
+      expect(detailAfterRemove.body.data.enrollments).toEqual([]);
+    } finally {
+      await prisma.enrollment.deleteMany({ where: { courseId: paidCourse.id } });
+      await prisma.course.delete({ where: { id: paidCourse.id } });
+    }
+  });
 });
 
 describe("suspension", () => {
@@ -810,5 +957,113 @@ describe("metrics", () => {
   it("requires an administrator", async () => {
     expect((await request(app).get("/api/v1/admin/metrics")).status).toBe(401);
     expect((await request(app).get("/api/v1/admin/metrics").set(await mentor())).status).toBe(403);
+  });
+});
+
+describe("enrollments and what was paid", () => {
+  it("lists enrollments with their payment and shows one in full", async () => {
+    await prisma.payment.create({
+      data: {
+        enrollmentId: fx.enrollment.id,
+        amountCents: 4500,
+        currency: "USD",
+        status: "SUCCEEDED",
+        provider: "polar",
+        providerRef: `order-${fx.tag}`,
+        originalAmountCents: 5000,
+        discountAmountCents: 500,
+        learnerAmountCents: 4500,
+        platformRevenueCents: 1350,
+        instructorShareCents: 3150,
+        instructorPayoutPercent: 70,
+        paidAt: new Date(),
+      },
+    });
+    try {
+      const list = await request(app).get(`/api/v1/admin/enrollments?query=${fx.tag}&payment=SUCCEEDED`).set(admin());
+      expect(list.status).toBe(200);
+      const row = list.body.data.enrollments.find((r: { id: string }) => r.id === fx.enrollment.id);
+      expect(row.learner.email).toBe(fx.learner.email);
+      expect(row.payment).toMatchObject({ status: "SUCCEEDED", amountCents: 4500, originalAmountCents: 5000 });
+      expect(row.discounts).toEqual([]);
+      expect(list.body.data.page.total).toBeGreaterThanOrEqual(1);
+
+      const none = await request(app).get(`/api/v1/admin/enrollments?query=${fx.tag}&payment=NONE`).set(admin());
+      expect(none.body.data.enrollments.some((r: { id: string }) => r.id === fx.enrollment.id)).toBe(false);
+
+      const detail = await request(app).get(`/api/v1/admin/enrollments/${fx.enrollment.id}`).set(admin());
+      expect(detail.status).toBe(200);
+      expect(detail.body.data.instructor.id).toBe(fx.mentor.id);
+      expect(detail.body.data.payment).toMatchObject({ amountCents: 4500, discountAmountCents: 500, refund: null });
+
+      expect((await request(app).get("/api/v1/admin/enrollments/missing-enrollment").set(admin())).status).toBe(404);
+      expect((await request(app).get("/api/v1/admin/enrollments").set(await mentor())).status).toBe(403);
+    } finally {
+      await prisma.payment.deleteMany({ where: { enrollmentId: fx.enrollment.id } });
+    }
+  });
+
+  it("edits an enrollment's access and payment, then deletes it completely", async () => {
+    const enrollment = await prisma.enrollment.create({
+      data: { courseId: fx.course.id, userId: fx.unverified.id, lifecycle: "PAYMENT_REQUIRED", source: "SELF" },
+    });
+
+    const noPayment = await request(app).patch(`/api/v1/admin/enrollments/${enrollment.id}`).set(admin()).send({ paymentStatus: "SUCCEEDED" });
+    expect(noPayment.status).toBe(409);
+    await prisma.payment.create({ data: { enrollmentId: enrollment.id, amountCents: 1999, status: "PENDING" } });
+    const amounts = await request(app).patch(`/api/v1/admin/enrollments/${enrollment.id}`).set(admin()).send({ amountCents: 1 });
+    expect(amounts.status).toBe(400);
+
+    const coupon = await prisma.instructorCoupon.create({
+      data: { courseId: fx.course.id, createdById: fx.mentor.id, label: "Launch week", code: `LAUNCH${fx.tag}`, percentOff: 20, maxRedemptions: 10 },
+    });
+    await prisma.instructorCouponRedemption.create({
+      data: { couponId: coupon.id, enrollmentId: enrollment.id, userId: fx.unverified.id, percentOff: 20 },
+    });
+    const discounted = await request(app).get(`/api/v1/admin/enrollments?query=${fx.tag}&discount=true`).set(admin());
+    const discountedRow = discounted.body.data.enrollments.find((r: { id: string }) => r.id === enrollment.id);
+    expect(discountedRow.discounts).toMatchObject([{ kind: "instructor_coupon", label: "Launch week", code: `LAUNCH${fx.tag}`, percentOff: 20 }]);
+    const fullPrice = await request(app).get(`/api/v1/admin/enrollments?query=${fx.tag}&discount=false`).set(admin());
+    expect(fullPrice.body.data.enrollments.some((r: { id: string }) => r.id === enrollment.id)).toBe(false);
+
+    const edited = await request(app)
+      .patch(`/api/v1/admin/enrollments/${enrollment.id}`)
+      .set(admin())
+      .send({ lifecycle: "ACTIVE", paymentStatus: "SUCCEEDED" });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data.lifecycle).toBe("ACTIVE");
+    expect(edited.body.data.payment).toMatchObject({ status: "SUCCEEDED", amountCents: 1999 });
+    expect(edited.body.data.payment.paidAt).not.toBeNull();
+
+    const audit = await prisma.adminAuditLog.findFirst({ where: { targetId: enrollment.id, action: "enrollment.update" } });
+    expect(audit?.actorId).toBe(adminId);
+
+    const empty = await request(app).patch(`/api/v1/admin/enrollments/${enrollment.id}`).set(admin()).send({});
+    expect(empty.status).toBe(400);
+    const bad = await request(app).patch(`/api/v1/admin/enrollments/${enrollment.id}`).set(admin()).send({ lifecycle: "OPEN" });
+    expect(bad.status).toBe(400);
+
+    const removed = await request(app).delete(`/api/v1/admin/enrollments/${enrollment.id}`).set(admin());
+    expect(removed.status).toBe(204);
+    expect(await prisma.enrollment.findUnique({ where: { id: enrollment.id } })).toBeNull();
+    expect(await prisma.payment.findUnique({ where: { enrollmentId: enrollment.id } })).toBeNull();
+  });
+
+  it("labels an admin enrollment as its discount and filters by it", async () => {
+    const enrolled = await request(app).post(`/api/v1/admin/users/${fx.unverified.id}/enroll`).set(admin()).send({ courseId: fx.course.id });
+    expect(enrolled.status).toBeLessThan(300);
+    const enrollment = await prisma.enrollment.findFirstOrThrow({ where: { userId: fx.unverified.id, courseId: fx.course.id } });
+    try {
+      const list = await request(app).get(`/api/v1/admin/enrollments?query=${fx.tag}&discount=admin`).set(admin());
+      const row = list.body.data.enrollments.find((r: { id: string }) => r.id === enrollment.id);
+      expect(row.payment.provider).toBe("admin");
+      expect(row.discounts).toMatchObject([{ kind: "admin_enrollment", label: "Admin enrollment" }]);
+      const fullPrice = await request(app).get(`/api/v1/admin/enrollments?query=${fx.tag}&discount=false`).set(admin());
+      expect(fullPrice.body.data.enrollments.some((r: { id: string }) => r.id === enrollment.id)).toBe(false);
+      const detail = await request(app).get(`/api/v1/admin/enrollments/${enrollment.id}`).set(admin());
+      expect(detail.body.data.discounts[0].kind).toBe("admin_enrollment");
+    } finally {
+      await prisma.enrollment.delete({ where: { id: enrollment.id } });
+    }
   });
 });

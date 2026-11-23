@@ -14,6 +14,7 @@ import { zipSync } from "fflate";
 import { load as loadYaml, dump as dumpYaml } from "js-yaml";
 import { z } from "zod";
 import { CourseManifestSchema, coursesRootForServer } from "./course-source.js";
+import { courseCategoryFromSource, type CourseCategory } from "../src/shared/domain/enums.js";
 import { findCourseFamily } from "../src/shared/lib/course-tracks.js";
 import type { Prisma } from "../src/generated/prisma/index.js";
 import type { SessionUser } from "../src/types/auth.js";
@@ -21,6 +22,7 @@ import type { SessionUser } from "../src/types/auth.js";
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COURSES_ROOT = coursesRootForServer(SERVER_ROOT);
 const REPO_ROOT = path.dirname(COURSES_ROOT);
+const CAPSTONE_PACK_FILE = /^capstone\/[a-z0-9-]+\.yaml$/;
 const ZIP_FILE = /^(?:variants\/[a-z0-9-]+\/)?\d+-[a-z0-9-]+\/\d+\.\d+-[a-z0-9-]+\.md$/;
 
 type Package = { slug: string; dir: string; manifest: ReturnType<typeof CourseManifestSchema.parse> };
@@ -61,6 +63,25 @@ export function ownershipSlugGroups(packages: Package[]): string[][] {
   return packages.map(pkg => [pkg.slug, ...(pkg.manifest.repositoryTargetSlug ? [pkg.manifest.repositoryTargetSlug] : [])]);
 }
 
+/**
+ * The instructor who owns a course: the `creatorEmail` in its course.yaml, or else the
+ * default instructor in courses/publishing.yaml. A course without `creatorEmail` behaves
+ * exactly as before.
+ */
+export function courseInstructorEmail(pkg: Package, defaultEmail: string): string {
+  return pkg.manifest.creatorEmail?.trim() || defaultEmail;
+}
+
+/** The distinct instructor emails a set of packages needs, compared without regard to case. */
+export function instructorEmailsFor(packages: Package[], defaultEmail: string): string[] {
+  const seen = new Map<string, string>();
+  for (const pkg of packages) {
+    const email = courseInstructorEmail(pkg, defaultEmail);
+    if (!seen.has(email.toLowerCase())) seen.set(email.toLowerCase(), email);
+  }
+  return [...seen.values()];
+}
+
 function filesForZip(dir: string): Record<string, Uint8Array> {
   const files: Record<string, Uint8Array> = {};
   function visit(current: string) {
@@ -70,7 +91,9 @@ function filesForZip(dir: string): Record<string, Uint8Array> {
       if (entry.isDirectory()) { visit(full); continue; }
       if (!entry.isFile()) throw new Error(`Unsupported course package entry: ${full}`);
       const relative = path.relative(dir, full).split(path.sep).join("/");
-      if (relative !== "course.yaml" && relative !== "COURSE-OUTLINE.md" && !ZIP_FILE.test(relative)) {
+      // Calibration examples are for the checker's own tests; they never ship to learners.
+      if (relative.startsWith("capstone/calibration/")) continue;
+      if (relative !== "course.yaml" && relative !== "COURSE-OUTLINE.md" && !CAPSTONE_PACK_FILE.test(relative) && !ZIP_FILE.test(relative)) {
         throw new Error(`Unsupported course package file: ${relative}`);
       }
       files[relative] = fs.readFileSync(full);
@@ -92,7 +115,7 @@ export function courseSourceHash(pkg: Package): string {
 }
 
 type CourseDetails = { title: string; description: string | null; projectGoal: string | null; difficulty: string | null;
-  estimatedHours: number | null; category: "TECH" | "SOFT_SKILLS"; coverUrl: string | null; assistant: unknown };
+  estimatedHours: number | null; category: CourseCategory; subcategory?: string | null; tags?: string[]; coverUrl: string | null; assistant: unknown; certificate?: unknown };
 
 // The repository owns a published course's details, so a publish copies them from course.yaml.
 // ZIP updates leave details alone, which kept an early preview's title on System Design.
@@ -100,11 +123,14 @@ export function courseDetailsUpdate(manifest: Package["manifest"], current: Cour
   const wanted: Partial<CourseDetails> = {
     title: manifest.title, description: manifest.description, projectGoal: manifest.projectGoal,
     difficulty: manifest.difficulty, estimatedHours: manifest.estimatedHours,
-    category: manifest.category === "soft-skills" ? "SOFT_SKILLS" : "TECH",
+    category: courseCategoryFromSource(manifest.category),
+    subcategory: manifest.subcategory ?? null,
+    tags: manifest.tags,
     // No cover in the source keeps whatever cover the course has.
     ...(manifest.coverUrl ? { coverUrl: manifest.coverUrl } : {}),
     // Tutor settings are a JSON column, so they compare by value; no block clears whatever is stored.
     assistant: manifest.assistant ?? null,
+    certificate: manifest.certificate ?? null,
   };
   const changed = Object.fromEntries(Object.entries(wanted).filter(([key, value]) =>
     JSON.stringify(current[key as keyof CourseDetails] ?? null) !== JSON.stringify(value)));
@@ -122,11 +148,8 @@ export function packageZip(pkg: Package, publication: "create" | "update", instr
   return zip;
 }
 
-function validate(pkg: Package, instructorEmail: string) {
-  if (pkg.manifest.creatorEmail && pkg.manifest.creatorEmail.toLowerCase() !== instructorEmail.toLowerCase()) {
-    throw new Error(`${pkg.slug}: creatorEmail conflicts with courses/publishing.yaml`);
-  }
-  packageZip(pkg, "create", instructorEmail);
+function validate(pkg: Package, defaultInstructorEmail: string) {
+  packageZip(pkg, "create", courseInstructorEmail(pkg, defaultInstructorEmail));
   const env = { ...process.env };
   delete env.COURSE_IMPORT_SOURCE;
   delete env.COURSE_IMPORT_RESULT;
@@ -156,7 +179,7 @@ function validate(pkg: Package, instructorEmail: string) {
   }
 }
 
-async function publish(packages: Package[], instructorEmail: string) {
+async function publish(packages: Package[], defaultInstructorEmail: string) {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL must be configured in the backend release environment");
   const { prisma } = await import("../src/db/prisma.js");
   const { Prisma } = await import("../src/generated/prisma/index.js");
@@ -164,42 +187,55 @@ async function publish(packages: Package[], instructorEmail: string) {
   const { previewCourseZipUpdate, approveCourseZipUpdate } = await import("../src/services/teach/course-update.js");
   const { publishCourse } = await import("../src/services/teach/courses.js");
   try {
-    const owner = await prisma.user.findUnique({ where: { email: instructorEmail },
-      select: { id: true, email: true, name: true, image: true, role: true, emailVerified: true, zipImportEnabled: true, testerEnabled: true } });
-    if (!owner || !["MENTOR", "ADMIN"].includes(owner.role) || !owner.emailVerified || !owner.zipImportEnabled) {
-      throw new Error(`${instructorEmail} must be a verified instructor with ZIP import access before repository publishing runs`);
+    // Check every instructor before any course changes, so one missing account stops the whole release.
+    const owners = new Map<string, SessionUser>();
+    for (const email of instructorEmailsFor(packages, defaultInstructorEmail)) {
+      const owner = await prisma.user.findUnique({ where: { email },
+        select: { id: true, email: true, name: true, image: true, role: true, emailVerified: true, zipImportEnabled: true, testerEnabled: true } });
+      if (!owner || !["MENTOR", "ADMIN"].includes(owner.role) || !owner.emailVerified || !owner.zipImportEnabled) {
+        throw new Error(`${email} must be a verified instructor with ZIP import access before repository publishing runs`);
+      }
+      owners.set(email.toLowerCase(), owner);
     }
-    const user: SessionUser = owner;
+    const instructorFor = (pkg: Package) => {
+      const email = courseInstructorEmail(pkg, defaultInstructorEmail);
+      return { email, user: owners.get(email.toLowerCase())! };
+    };
     // Bind only opted-in repository courses. The previous owner keeps
     // COURSE_CREATOR access; unpublished source packages must not mutate DB ownership.
-    for (const slugs of ownershipSlugGroups(packages)) {
-      const courses = await prisma.course.findMany({ where: { slug: { in: slugs } }, select: { id: true, slug: true, mentorId: true } });
-      for (const course of courses) {
-        if (course.mentorId === user.id) continue;
-        await prisma.$transaction(async tx => {
-          await tx.courseInstructor.upsert({
-            where: { courseId_userId: { courseId: course.id, userId: course.mentorId } },
-            update: { role: "COURSE_CREATOR" },
-            create: { courseId: course.id, userId: course.mentorId, role: "COURSE_CREATOR" },
+    for (const pkg of packages) {
+      const { email: instructorEmail, user } = instructorFor(pkg);
+      for (const slugs of ownershipSlugGroups([pkg])) {
+        const courses = await prisma.course.findMany({ where: { slug: { in: slugs } }, select: { id: true, slug: true, mentorId: true } });
+        for (const course of courses) {
+          if (course.mentorId === user.id) continue;
+          await prisma.$transaction(async tx => {
+            await tx.courseInstructor.upsert({
+              where: { courseId_userId: { courseId: course.id, userId: course.mentorId } },
+              update: { role: "COURSE_CREATOR" },
+              create: { courseId: course.id, userId: course.mentorId, role: "COURSE_CREATOR" },
+            });
+            await tx.courseInstructor.deleteMany({ where: { courseId: course.id, userId: user.id } });
+            const changed = await tx.course.updateMany({ where: { id: course.id, mentorId: course.mentorId }, data: { mentorId: user.id } });
+            if (changed.count !== 1) throw new Error(`${course.slug}: course ownership changed during binding; retry the workflow`);
           });
-          await tx.courseInstructor.deleteMany({ where: { courseId: course.id, userId: user.id } });
-          const changed = await tx.course.updateMany({ where: { id: course.id, mentorId: course.mentorId }, data: { mentorId: user.id } });
-          if (changed.count !== 1) throw new Error(`${course.slug}: course ownership changed during binding; retry the workflow`);
-        });
-        console.log(`${course.slug}: assigned course ownership to ${instructorEmail}`);
+          console.log(`${course.slug}: assigned course ownership to ${instructorEmail}`);
+        }
       }
     }
     for (const pkg of packages) {
+      const { email: instructorEmail, user } = instructorFor(pkg);
       const targetSlug = pkg.manifest.repositoryTargetSlug ?? pkg.slug;
       const sourceHash = courseSourceHash(pkg);
       const prior = await prisma.course.findUnique({ where: { slug: targetSlug }, select: {
         id: true, status: true, activeReleaseId: true, repositorySourceHash: true, repositoryReleaseId: true,
-        title: true, description: true, projectGoal: true, difficulty: true, estimatedHours: true, category: true, coverUrl: true, assistant: true,
+        title: true, description: true, projectGoal: true, difficulty: true, estimatedHours: true, category: true, subcategory: true, tags: true, coverUrl: true, assistant: true, certificate: true,
       } });
       const details = prior ? courseDetailsUpdate(pkg.manifest, prior) : null;
       if (prior && details) {
         await prisma.course.update({ where: { id: prior.id }, data: { ...details,
-          ...("assistant" in details ? { assistant: details.assistant ?? Prisma.DbNull } : {}) } as Prisma.CourseUpdateInput });
+          ...("assistant" in details ? { assistant: details.assistant ?? Prisma.DbNull } : {}),
+          ...("certificate" in details ? { certificate: details.certificate ?? Prisma.DbNull } : {}) } as Prisma.CourseUpdateInput });
         console.log(`${pkg.slug}: course details updated (${Object.keys(details).join(", ")})`);
       }
       if (prior?.status === "PUBLISHED" && prior.repositorySourceHash === sourceHash &&
@@ -249,11 +285,11 @@ async function main() {
     else console.log("No private course checkout configured; platform is ready for content publishing.");
     return;
   }
-  const { instructorEmail } = publishingSettings();
+  const { instructorEmail: defaultInstructorEmail } = publishingSettings();
   const packages = selectedPackages();
   if (mode === "--count") { console.log(packages.length); return; }
-  for (const pkg of packages) validate(pkg, instructorEmail);
-  if (mode === "--publish") await publish(packages, instructorEmail);
+  for (const pkg of packages) validate(pkg, defaultInstructorEmail);
+  if (mode === "--publish") await publish(packages, defaultInstructorEmail);
   else console.log(`Validated ${packages.length} opted-in course package(s).`);
 }
 

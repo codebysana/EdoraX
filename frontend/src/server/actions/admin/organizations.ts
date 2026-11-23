@@ -66,7 +66,6 @@ export async function bulkUpsertOrganizationCourseAllocationsAction(
     await adminCall<void>(`/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/allocations`, {
       method: "PUT",
       json: {
-        isAllowed: formData.get("isAllowed") === "on" || formData.get("isAllowed") === "true",
         courses: courseIds.map((courseId) => ({
           courseId,
           maxEnrollments: Number(formData.get(`maxEnrollments_${courseId}`) ?? 0),
@@ -83,6 +82,23 @@ export async function bulkUpsertOrganizationCourseAllocationsAction(
   });
 }
 
+/**
+ * Turns integration enrollments on or off for one allocated course. This is the
+ * flag the integration catalog filters on, so a course with it off cannot be
+ * assigned even though it sits in the organization's catalog.
+ */
+export async function setAllocationAllowedAction(formData: FormData): Promise<void> {
+  const organizationId = String(formData.get("organizationId") ?? "");
+  const courseId = String(formData.get("courseId") ?? "");
+  if (!organizationId || !courseId) throw new Error("Missing organization or course.");
+  await adminCall(
+    `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/allocations/${encodeURIComponent(courseId)}/allowed`,
+    { method: "PATCH", json: { enabled: formData.get("enabled") === "true" } }
+  );
+  revalidatePath(`/admin/organizations/${organizationId}`);
+  revalidatePath("/admin/organizations");
+}
+
 /** Lets (or stops) an organization's learners joining a course's weekly leaderboards. */
 export async function setAllocationLeaderboardAction(formData: FormData): Promise<void> {
   const organizationId = String(formData.get("organizationId") ?? "");
@@ -94,6 +110,32 @@ export async function setAllocationLeaderboardAction(formData: FormData): Promis
   );
   revalidatePath(`/admin/organizations/${organizationId}`);
 }
+
+
+
+
+export async function grantOrganizationCreditsAction(
+  _prev: AdminActionState,
+  formData: FormData
+): Promise<AdminActionState> {
+  const organizationId = String(formData.get("organizationId") ?? "");
+  const amountDollars = Number(formData.get("amountDollars") ?? 0);
+  const reason = String(formData.get("reason") ?? "").trim() || undefined;
+  if (!organizationId) return { ok: false, message: "Missing organization." };
+  if (amountDollars <= 0) return { ok: false, message: "Credit amount must be greater than zero." };
+
+  const amountCredits = Math.round(amountDollars * 100);
+
+  return runAdminAction(async () => {
+    await adminCall(`/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/credits`, {
+      method: "POST",
+      json: { amountCredits, reason },
+    });
+    revalidatePath(`/admin/organizations/${organizationId}`);
+    return `Granted ${amountCredits} credits ($${amountDollars.toFixed(2)}) to organization.`;
+  });
+}
+
 
 /** Create a limited coupon pool for one allocated course, or a general pool for any allocated course. */
 export async function createOrganizationCouponPoolAction(
@@ -124,9 +166,17 @@ export async function setOrganizationCouponPoolActiveAction(formData: FormData):
   const organizationId = String(formData.get("organizationId") ?? "");
   const poolId = String(formData.get("poolId") ?? "");
   if (!organizationId || !poolId) throw new Error("Missing organization or coupon pool.");
+  const maxRedemptions = String(formData.get("maxRedemptions") ?? "").trim();
+  const active = String(formData.get("active") ?? "").trim();
   await adminCall(
     `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/coupons/${encodeURIComponent(poolId)}`,
-    { method: "PATCH", json: { active: formData.get("active") === "true" } }
+    { method: "PATCH", json: {
+      ...(active ? { active: active === "true" } : {}),
+      ...(maxRedemptions ? { maxRedemptions: Number(maxRedemptions) } : {}),
+    } }
   );
   revalidatePath(`/admin/organizations/${organizationId}`);
 }
+
+
+

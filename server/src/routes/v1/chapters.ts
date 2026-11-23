@@ -12,6 +12,7 @@ import {
   checklistItemParams,
   headingNoteBody,
   headingNoteParams,
+  highlightCreateBody,
   learningLogBody,
   quizSubmitBody,
 } from "../../validations/chapters.js";
@@ -52,6 +53,16 @@ router.post("/:chapterId/complete", ...learner, validateParams(chapterParams), c
 router.put("/:chapterId/checklist/:itemId", ...learner, validate({ params: checklistItemParams, body: checklistItemBody }), chapters.putChecklistItem);
 router.put("/:chapterId/learning-log", ...learner, validate({ params: chapterParams, body: learningLogBody }), chapters.putLearningLog);
 router.put("/:chapterId/notes/:headingId", ...learner, validate({ params: headingNoteParams, body: headingNoteBody }), chapters.putHeadingNote);
+
+// Learner highlights on a chapter (private annotations). Update and delete are by highlight id only: /api/v1/learner/highlights/:highlightId.
+router.get("/:chapterId/highlights", ...learner, validateParams(chapterParams), chapters.getHighlights);
+router.post(
+  "/:chapterId/highlights",
+  ...learner,
+  validate({ params: chapterParams, body: highlightCreateBody }),
+  userRateLimit({ scope: "highlight-create", max: 30, message: "You are highlighting quickly. Wait a minute and try again." }),
+  chapters.postHighlight
+);
 
 // Ask about this chapter. Access is checked in the service (same rules as blocks); the daily and
 // platform limits are counted in the database, and this limiter only blunts a burst before it gets there.

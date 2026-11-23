@@ -17,6 +17,7 @@ import { mdxComponentAllowlist } from "../src/shared/mdx/component-allowlist.js"
 import { remarkChecklist } from "../src/shared/mdx/remark-checklist.js";
 import { remarkLearningLog } from "../src/shared/mdx/remark-learning-log.js";
 import { remarkMermaid } from "../src/shared/mdx/remark-mermaid.js";
+import { remarkHtmlPreview } from "../src/shared/mdx/remark-html-preview.js";
 import { remarkDiagram } from "../src/shared/mdx/remark-diagram.js";
 import { restoreInteractiveBlockTags } from "../src/shared/mdx/restore-block-tags.js";
 import { collectContentTokenProblems, tokenInFieldProblem } from "../src/shared/lib/content-tokens.js";
@@ -29,7 +30,7 @@ export type ChapterMdxFailure = { file: string; error: string };
 
 export function validateParsedLesson(lesson: ReturnType<typeof parseLesson>): void {
   const processor = unified().use(remarkParse).use(remarkMdx).use(remarkGfm)
-    .use(remarkChecklist).use(remarkLearningLog).use(remarkDiagram).use(remarkMermaid);
+    .use(remarkChecklist).use(remarkLearningLog).use(remarkHtmlPreview).use(remarkDiagram).use(remarkMermaid);
   const source = restoreInteractiveBlockTags(lesson.source);
   if (lesson.readerMode === "QUIZ" && !isActivityOnlySource(source)) {
     throw new Error("Quiz flow supports activities only: Quiz, OpenQuestion, Predict, and CodeExercise.");

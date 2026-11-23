@@ -3,20 +3,22 @@ import {
   CourseIDEPanel,
   OpenIDEButton,
   useCourseIDE,
-} from "../labs/CourseIDE";
-import { playFeedback } from "../../lib/sound-feedback";
-import { DesktopToolbar } from "../layout/DesktopToolbar";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Lesson } from "../../domain/learning";
-import type { QuizChapterState } from "../../../../server/src/shared/api/blocks";
-import { LessonContent } from "./LessonContent";
-import { Exercise } from "./Exercise";
-import { QuizSession } from "./quiz/QuizSession";
-import { SecureExamGate } from "./quiz/secure/SecureExamGate";
-import { AccountMenu } from "../auth/AccountMenu";
-import type { Session } from "../auth/useSession";
-import { ArrowLeft, Clock } from "lucide-react";
-import { ResizeDivider, loadPaneWidth } from "../labs/ResizeDivider";
+} from '../labs/CourseIDE';
+import { playFeedback } from '../../lib/sound-feedback';
+import { useToast } from '../toast/Toast';
+import { useDotVoice } from '../mascot/DotVoice';
+import { DesktopToolbar } from '../layout/DesktopToolbar';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Lesson } from '../../domain/learning';
+import type { QuizChapterState } from '../../../../server/src/shared/api/blocks';
+import { LessonContent } from './LessonContent';
+import { Exercise } from './Exercise';
+import { QuizSession } from './quiz/QuizSession';
+import { SecureExamGate } from './quiz/secure/SecureExamGate';
+import { AccountMenu } from '../auth/AccountMenu';
+import type { Session } from '../auth/useSession';
+import { ArrowLeft, Clock } from 'lucide-react';
+import { ResizeDivider, loadPaneWidth } from '../labs/ResizeDivider';
 import {
   ChapterSidebar,
   SidebarToggle,
@@ -60,8 +62,27 @@ function CourseReaderBody({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [queuedChapter, setQueuedChapter] = useState<string | null>(null);
+  const toast = useToast();
+  const { track: trackDot } = useDotVoice();
   const [quiz, setQuiz] = useState<QuizChapterState | null>(null);
   const [sidebarClosed, setSidebarClosed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('curriculum-sidebar-width'));
+      return saved >= 240 && saved <= 560 ? Math.max(252, saved) : 288;
+    } catch {
+      return 288;
+    }
+  });
+  const resizeSidebar = (width: number) => {
+    setSidebarWidth(width);
+    try {
+      localStorage.setItem('curriculum-sidebar-width', String(width));
+    } catch {
+      /* local preferences are optional */
+    }
+  };
   const [tocClosed, setTocClosed] = useState(false);
   // True while a protected quiz runs. The menus are hidden so nothing pulls the learner away.
   const [quizLocked, setQuizLocked] = useState(false);
@@ -75,6 +96,7 @@ function CourseReaderBody({
     () => (lesson ? lessonHeadings(lesson.document) : null),
     [lesson?.document],
   );
+  const variant = variantForTrack(lesson?.track ?? null);
   const showHeadings =
     lesson?.chapter.readerMode !== "QUIZ" &&
     !(lesson?.content?.predictGate && !lesson.content.predictRevealed);
@@ -104,6 +126,16 @@ function CourseReaderBody({
     setError(result.message);
     if (result.code === "AUTH_REQUIRED") onSignedOut();
   }
+  // Errors that happen while a lesson is open show as a toast with a retry action.
+  useEffect(() => {
+    if (!error || !lesson) return;
+    toast.error('Something went wrong', {
+      description: error,
+      action: { label: 'Try again', onClick: () => void load(lesson.chapter.slug, true) },
+    });
+    // The toast should fire once per error message, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error]);
   async function load(chapter: string, refresh = false) {
     const request = ++generation.current;
     if (!refresh) {
@@ -198,16 +230,23 @@ function CourseReaderBody({
     setBusy(true);
     setError("");
     try {
-      const result = await window.buildment.learning.complete(
-        lesson.chapter.id,
-      );
-      if (!result.ok) fail(result);
-      else {
-        playFeedback("completion");
+      const result = await window.buildment.learning.complete(lesson.chapter.id);
+      if (!result.ok) {
+        fail(result);
+      } else if ((result.data as { queued?: boolean } | null)?.queued) {
+        // Offline: the completion is queued and syncs in the background, so reloading would only fail.
+        setQueuedChapter(lesson.chapter.id);
+        toast.info('Saved offline', { description: 'This lesson will be marked complete when you are back online.' });
+      } else {
+        playFeedback('completion');
+        void trackDot({ type: 'chapter_completed', chapterId: lesson.chapter.id });
         await load(lesson.chapter.slug, true);
       }
     } catch {
-      setError("Could not save lesson completion. Try again.");
+      toast.error('Could not save lesson completion', {
+        description: 'Try again in a moment.',
+        action: { label: 'Try again', onClick: () => void complete() },
+      });
     } finally {
       setBusy(false);
     }
@@ -219,59 +258,56 @@ function CourseReaderBody({
     <CourseNavigationProvider onNavigate={navigate}>
       <VariantThemeScope variant={variantForTrack(lesson?.track ?? null)}>
         <div className="course-overview-surface flex h-full flex-col overflow-hidden bg-background">
-          {!ide.focused && !quizLocked && (
-            <DesktopToolbar>
-              <div className="flex min-w-0 items-center gap-2">
-                <SidebarToggle
-                  collapsed={sidebarClosed}
-                  onClick={() => setSidebarClosed(!sidebarClosed)}
+          {!ide.focused && !quiz && (
+          <DesktopToolbar>
+            <div className="flex min-w-0 items-center gap-2">
+              <SidebarToggle
+                collapsed={sidebarClosed}
+                onClick={() => setSidebarClosed(!sidebarClosed)}
+              />
+              <button
+                aria-label="Back to course preview"
+                title="Back to course preview"
+                onClick={onBack}
+                className="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <ArrowLeft size={16} />
+                <span>Course</span>
+              </button>
+              <div className="min-w-0 border-l border-border pl-3">
+                <p className="truncate text-[11px] font-medium text-muted-foreground">
+                  {lesson?.course.title || courseTitle}
+                </p>
+                <p className="truncate text-[13px] font-semibold">
+                  {lesson?.chapter.title || 'Loading lesson…'}
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {showHeadings && Boolean(annotated?.headings.length) && (
+                <TocToggle
+                  collapsed={tocClosed}
+                  onClick={() => setTocClosed(!tocClosed)}
                 />
-                <button
-                  aria-label="Back to course preview"
-                  title="Back to course preview"
-                  onClick={onBack}
-                  className="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <ArrowLeft size={16} />
-                  <span>Course</span>
-                </button>
-                <div className="min-w-0 border-l border-border pl-3">
-                  <p className="truncate text-[11px] font-medium text-muted-foreground">
-                    {lesson?.course.title || courseTitle}
-                  </p>
-                  <p className="truncate text-[13px] font-semibold">
-                    {lesson?.chapter.title || "Loading lesson…"}
-                  </p>
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {showHeadings && Boolean(annotated?.headings.length) && (
-                  <TocToggle
-                    collapsed={tocClosed}
-                    onClick={() => setTocClosed(!tocClosed)}
-                  />
-                )}
-                <OpenIDEButton />
-                <AccountMenu session={session} />
-              </div>
-            </DesktopToolbar>
+              )}
+              <OpenIDEButton />
+              <AccountMenu session={session} />
+            </div>
+          </DesktopToolbar>
           )}
           {session.authError && (
             <p role="alert" className="m-5 rounded border border-border p-4">
               {session.authError}
             </p>
           )}
-          {error && (
-            <div
-              role="alert"
-              className="mb-5 rounded-xl border border-border p-4"
-            >
-              <p>{error}</p>
+          {error && !lesson && !loading && (
+            <div role="alert" className="m-auto max-w-md rounded-xl border border-border bg-card p-6 text-center">
+              <p className="font-semibold text-foreground">This lesson did not load</p>
+              <p className="mt-1 text-sm text-muted-foreground">{error}</p>
               <button
-                className="mt-2 underline"
-                onClick={() =>
-                  lesson ? void load(lesson.chapter.slug) : void start()
-                }
+                type="button"
+                className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground"
+                onClick={() => void start()}
               >
                 Try again
               </button>
@@ -280,7 +316,8 @@ function CourseReaderBody({
           {loading && <LessonLoading />}
           {lesson && !loading && (
             <div className="flex min-h-0 flex-1 overflow-hidden">
-              <div className={ide.open || quizLocked ? "hidden" : "contents"}>
+              <div className={ide.open ? 'hidden' : 'contents'}>
+                {lesson.chapter.readerMode !== 'QUIZ' && (
                 <ChapterSidebar
                   courseSlug={courseSlug}
                   courseTitle={lesson.course.title}
@@ -288,8 +325,11 @@ function CourseReaderBody({
                   currentChapterSlug={lesson.chapter.slug}
                   collapsed={sidebarClosed}
                   mobileSheet={smallWindow}
+                  width={sidebarWidth}
+                  onWidthChange={resizeSidebar}
                   onToggle={() => setSidebarClosed(true)}
                 />
+                )}
               </div>
               <div
                 className={`${ide.open && (ide.focused || smallWindow) ? "hidden" : ""} min-w-0 flex-1 overflow-y-auto`}
@@ -322,6 +362,24 @@ function CourseReaderBody({
                       </p>
                     )}
 
+                  {lesson.course.projectGoal &&
+                    lesson.chapter.readerMode !== 'QUIZ' && (
+                      <div className="mt-4 rounded-xl border border-border bg-card px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          The project:{' '}
+                        </span>
+                        {lesson.course.projectGoal.trim().replace(/\.+$/, '')}.
+                      </div>
+                    )}
+                  {variant && lesson.chapter.readerMode !== 'QUIZ' && (
+                    <div className="mt-2 rounded-xl bg-muted/60 px-4 py-2.5 text-sm leading-relaxed text-muted-foreground">
+                      <span className="font-medium text-foreground">
+                        You are building:{' '}
+                      </span>
+                      {variant.productName} ({variant.label.toLowerCase()}{' '}
+                      variant)
+                    </div>
+                  )}
                   {lesson.locked ? (
                     <div className="mt-6">
                       <p>
@@ -375,6 +433,7 @@ function CourseReaderBody({
                                   state={quiz}
                                   complete={lesson.content.chapterComplete}
                                   onSaved={refresh}
+                                  onExit={onBack}
                                 />
                               </SecureExamGate>
                             ) : (
@@ -384,6 +443,7 @@ function CourseReaderBody({
                                 state={quiz}
                                 complete={lesson.content.chapterComplete}
                                 onSaved={refresh}
+                                onExit={onBack}
                               />
                             )
                           ) : (
@@ -438,15 +498,17 @@ function CourseReaderBody({
                               </button>
                             )}
                             <button
-                              disabled={busy || !lesson.content.canMarkComplete}
+                              disabled={busy || !lesson.content.canMarkComplete || queuedChapter === lesson.chapter.id}
                               onClick={() => void complete()}
                               className="rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
                             >
                               {lesson.content.chapterComplete
-                                ? "Lesson completed"
-                                : busy
-                                  ? "Saving…"
-                                  : "Mark lesson complete"}
+                                ? 'Lesson completed'
+                                : queuedChapter === lesson.chapter.id
+                                  ? 'Saved offline'
+                                  : busy
+                                    ? 'Saving…'
+                                    : 'Mark lesson complete'}
                             </button>
                             {lesson.next && (
                               <button

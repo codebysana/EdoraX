@@ -1,45 +1,33 @@
 import type { Metadata, Viewport } from "next";
-import { DM_Sans, IBM_Plex_Sans, JetBrains_Mono, Space_Grotesk, Unbounded } from "next/font/google";
+import localFont from "next/font/local";
 import { PostHogProvider } from "@/components/posthog-provider";
 import { AppToast } from "@/components/ui/app-toast";
 import { PwaSupport } from "@/components/pwa-support";
+import { AudiobookPlayerProvider } from "@/components/audiobooks/audiobook-player";
 import { ThemeProvider } from "@/components/theme-provider";
 import { THEME_INIT_SCRIPT } from "@/lib/theme-init-script";
 import { SITE_DESCRIPTION, SITE_NAME, SITE_SHARE_IMAGE, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 // Edorax type: DM Sans for everything you read, Unbounded 700 for headings.
-const dmSans = DM_Sans({
+const dmSans = localFont({
+  src: "./fonts/dm-sans-latin-variable.woff2",
   variable: "--font-dm-sans",
-  subsets: ["latin"],
+  weight: "100 1000",
   display: "swap",
 });
 
-const unbounded = Unbounded({
+const unbounded = localFont({
+  src: "./fonts/unbounded-latin-700.woff2",
   variable: "--font-unbounded",
-  subsets: ["latin"],
-  weight: ["700"],
+  weight: "700",
   display: "swap",
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const jetbrainsMono = localFont({
+  src: "./fonts/jetbrains-mono-latin-variable.woff2",
   variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-// Used by the system design lab board: its own type voice (see src/lab/board-style.ts).
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-grotesk",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-  display: "swap",
-});
-
-const ibmPlexSans = IBM_Plex_Sans({
-  variable: "--font-plex",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: "100 800",
   display: "swap",
 });
 
@@ -77,7 +65,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${dmSans.variable} ${unbounded.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} ${ibmPlexSans.variable} h-full antialiased`}
+      className={`${dmSans.variable} ${unbounded.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <script
@@ -85,7 +73,9 @@ export default function RootLayout({
           suppressHydrationWarning
         />
         <ThemeProvider>
-          <PostHogProvider>{children}</PostHogProvider>
+          <PostHogProvider>
+            <AudiobookPlayerProvider>{children}</AudiobookPlayerProvider>
+          </PostHogProvider>
           <AppToast />
         </ThemeProvider>
         <PwaSupport />

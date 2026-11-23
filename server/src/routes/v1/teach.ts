@@ -1,3 +1,4 @@
+import { requireInstructorWithdrawals } from "../../middlewares/instructor-withdrawals.js";
 import { raw, Router } from "express";
 import * as teach from "../../controllers/teach.js";
 import * as media from "../../controllers/course-media.js";
@@ -13,7 +14,9 @@ import {
 } from "../../middlewares/validate.js";
 import {
   assignByEmailsBody,
+  courseCertificateTemplateBody,
   approveCourseZipUpdateBody,
+  campaignIdParams,
   chapterDraftBody,
   courseInstructorInviteBody,
   courseInstructorInviteParams,
@@ -21,8 +24,11 @@ import {
   courseInstructorPendingInviteParams,
   chapterSettingsBody,
   courseIdParams,
+  courseCouponParams,
   courseSettingsBody,
   courseSlugParams,
+  createInstructorCouponBody,
+  instructorCouponActiveBody,
   createChapterBody,
   createCourseBody,
   createModuleBody,
@@ -33,9 +39,11 @@ import {
   menteeParams,
   moduleIdParams,
   moveBody,
+  participateCampaignBody,
   renameModuleBody,
   removeChapterBody,
   reportsQuery,
+  requestWithdrawalBody,
   responseIdParams,
   reviewQueueQuery,
   submitReviewBody,
@@ -55,6 +63,13 @@ const router = Router();
 router.use(authenticate, requireVerified, requireInstructor);
 
 router.get("/workspace", teach.getWorkspace);
+router.get("/wallet", teach.getWallet);
+router.post("/wallet/withdraw", requireInstructorWithdrawals, validateBody(requestWithdrawalBody), teach.requestWithdrawal);
+router.get("/campaigns", teach.getCampaigns);
+router.post("/campaigns/:campaignId/participate", validate({ params: campaignIdParams, body: participateCampaignBody }), teach.participateCampaign);
+
+
+
 
 router.get("/courses", teach.listCourses);
 router.post(
@@ -77,91 +92,27 @@ router.post(
   teach.approveCourseZipUpdate,
 );
 router.post("/courses", validateBody(createCourseBody), teach.createCourse);
-router.get(
-  "/courses/:courseSlug/builder",
-  validateParams(courseSlugParams),
-  teach.getCourseBuilder,
-);
-router.get(
-  "/courses/:courseSlug/settings",
-  validateParams(courseSlugParams),
-  teach.getCourseSettings,
-);
-router.get(
-  "/courses/:courseSlug/preview",
-  validateParams(courseSlugParams),
-  teach.getCourseDraftPreview,
-);
-router.get(
-  "/courses/:courseSlug/team",
-  validateParams(courseSlugParams),
-  teach.getCourseTeam,
-);
-router.post(
-  "/courses/:courseId/media/:purpose",
-  raw({ type: "image/*", limit: "8mb" }),
-  media.upload,
-);
-router.post(
-  "/courses/:courseId/instructor-invites",
-  validate({ params: courseIdParams, body: courseInstructorInviteBody }),
-  teach.inviteCourseInstructor,
-);
-router.post(
-  "/instructor-invites/:token/accept",
-  validateParams(courseInstructorInviteParams),
-  teach.acceptCourseInstructorInvite,
-);
-router.delete(
-  "/courses/:courseId/instructors/:userId",
-  validateParams(courseInstructorMemberParams),
-  teach.removeCourseInstructor,
-);
-router.delete(
-  "/courses/:courseId/instructor-invites/:inviteId",
-  validateParams(courseInstructorPendingInviteParams),
-  teach.revokeCourseInstructorInvite,
-);
-router.patch(
-  "/courses/:courseId/settings",
-  validate({ params: courseIdParams, body: courseSettingsBody }),
-  teach.updateCourseSettings,
-);
-router.put(
-  "/courses/:courseId/integrity",
-  validate({ params: courseIdParams, body: courseIntegrityBody }),
-  integrity.updateCourseSettings,
-);
-router.post(
-  "/courses/:courseId/chapters/publish",
-  validateParams(courseIdParams),
-  teach.publishCourseChapters,
-);
-router.post(
-  "/modules/:moduleId/chapters/publish",
-  validateParams(moduleIdParams),
-  teach.publishModuleChapters,
-);
-router.post(
-  "/courses/:courseId/publish",
-  validateParams(courseIdParams),
-  teach.publishCourse,
-);
-router.post(
-  "/courses/:courseId/unpublish",
-  validate({ params: courseIdParams, body: unpublishCourseBody }),
-  teach.unpublishCourse,
-);
-router.post(
-  "/courses/:courseId/restore",
-  validateParams(courseIdParams),
-  teach.restoreCourse,
-);
-router.delete(
-  "/courses/:courseId",
-  validate({ params: courseIdParams, body: deleteCourseBody }),
-  teach.deleteCourse,
-);
+router.get("/courses/:courseSlug/builder", validateParams(courseSlugParams), teach.getCourseBuilder);
+router.get("/courses/:courseSlug/settings", validateParams(courseSlugParams), teach.getCourseSettings);
+router.get("/courses/:courseSlug/coupons", validateParams(courseSlugParams), teach.listCourseCoupons);
+router.post("/courses/:courseId/coupons", validate({ params: courseIdParams, body: createInstructorCouponBody }), teach.createCourseCoupon);
+router.patch("/courses/:courseId/coupons/:couponId", validate({ params: courseCouponParams, body: instructorCouponActiveBody }), teach.setCourseCouponActive);
+router.get("/courses/:courseSlug/preview", validateParams(courseSlugParams), teach.getCourseDraftPreview);
+router.get("/courses/:courseSlug/team", validateParams(courseSlugParams), teach.getCourseTeam);
+router.post("/courses/:courseId/media/:purpose", raw({ type: "image/*", limit: "8mb" }), media.upload);
+router.post("/courses/:courseId/instructor-invites", validate({ params: courseIdParams, body: courseInstructorInviteBody }), teach.inviteCourseInstructor);
+router.post("/instructor-invites/:token/accept", validateParams(courseInstructorInviteParams), teach.acceptCourseInstructorInvite);
+router.delete("/courses/:courseId/instructors/:userId", validateParams(courseInstructorMemberParams), teach.removeCourseInstructor);
+router.delete("/courses/:courseId/instructor-invites/:inviteId", validateParams(courseInstructorPendingInviteParams), teach.revokeCourseInstructorInvite);
+router.patch("/courses/:courseId/settings", validate({ params: courseIdParams, body: courseSettingsBody }), teach.updateCourseSettings);
+router.put("/courses/:courseId/certificate-template", validate({ params: courseIdParams, body: courseCertificateTemplateBody }), teach.setCourseCertificateTemplate);
+router.put("/courses/:courseId/integrity", validate({ params: courseIdParams, body: courseIntegrityBody }), integrity.updateCourseSettings);
+router.post("/courses/:courseId/chapters/publish", validateParams(courseIdParams), teach.publishCourseChapters);
+router.post("/modules/:moduleId/chapters/publish", validateParams(moduleIdParams), teach.publishModuleChapters);
+router.post("/courses/:courseId/publish", validateParams(courseIdParams), teach.publishCourse);
+router.post("/courses/:courseId/unpublish", validate({ params: courseIdParams, body: unpublishCourseBody }), teach.unpublishCourse);
+router.post("/courses/:courseId/restore", validateParams(courseIdParams), teach.restoreCourse);
+router.delete("/courses/:courseId", validate({ params: courseIdParams, body: deleteCourseBody }), teach.deleteCourse);
 
 router.post(
   "/courses/:courseId/modules",

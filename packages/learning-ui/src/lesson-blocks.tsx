@@ -18,7 +18,7 @@ import { Callout } from "./components/learn/callout";
 import { CheckpointIntro } from "./components/learn/checkpoint-intro";
 import {
   ArchitectureDiagram, ArchNode, CompareColumn, ComparePanel, DiffBlock,
-  FileTree, FileTreeItem, TerminalBlock, TerminalLine, TraceRequest, TraceStep,
+  FileTree, FileTreeItem, HtmlPreview, TerminalBlock, TerminalLine, TraceRequest, TraceStep,
 } from "./components/learn/content-blocks";
 import { FaqGroup, FaqItem } from "./components/learn/faq-group";
 import { GlossaryTerm } from "./components/learn/glossary-term";
@@ -67,6 +67,7 @@ export const sharedLessonBlocks: Record<string, ComponentType<any>> = {
   DiffBlock,
   FileTree,
   FileTreeItem,
+  HtmlPreview,
   TerminalBlock,
   TerminalLine,
   TraceRequest,

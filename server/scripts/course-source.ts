@@ -12,8 +12,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
 import { z } from "zod";
+import { COURSE_CATEGORY_SOURCE_VALUES } from "../src/shared/domain/enums.js";
 import { findCourseFamily } from "../src/shared/lib/course-tracks.js";
 import { isSafeProductName } from "../src/shared/lib/content-tokens.js";
+import { CertificateSettingsSchema } from "../src/shared/lib/certificates.js";
 import { ASSISTANT_GUIDANCE_MAX, ASSISTANT_STARTERS_MAX, ASSISTANT_STARTER_MAX, assistantEfforts } from "../src/services/ai/chapter-qa/assistant.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -98,8 +100,12 @@ export const CourseManifestSchema = z.object({
   projectGoal: z.string().min(1),
   difficulty: z.enum(["Beginner", "Medium", "Advanced"]),
   estimatedHours: z.number().int().positive(),
-  /** Catalog grouping: "tech" (default) or "soft-skills". */
-  category: z.enum(["tech", "soft-skills"]).default("tech"),
+  /** Catalog grouping: "tech" (default), "soft-skills" or "cloud-devops". */
+  category: z.enum(COURSE_CATEGORY_SOURCE_VALUES).default("tech"),
+  /** Learner-facing topic within the broad category, for example AI, Full Stack, or AWS. */
+  subcategory: z.string().trim().min(1).max(80).optional(),
+  /** Normalized search and filtering terms displayed in Explore courses. */
+  tags: z.array(z.string().trim().min(1).max(32)).max(12).default([]),
   coverUrl: z.string().url().optional(),
   /**
    * Opt in to listen-along audio. `agent-ip/scripts/narrate/narrate.py` reads this block and
@@ -123,6 +129,11 @@ export const CourseManifestSchema = z.object({
     /** Short questions offered as one-tap chips in every chapter. */
     starters: z.array(z.string().trim().min(3).max(ASSISTANT_STARTER_MAX)).max(ASSISTANT_STARTERS_MAX).optional(),
   }).strict().optional(),
+  /**
+   * Completion certificate for this track (docs/16-capstone-checker-and-certificates.mdx). Issued when
+   * every chapter is complete and a mentor approved every capstone check in the course.
+   */
+  certificate: CertificateSettingsSchema.optional(),
   /**
    * Branded diagrams written as ```flow and ```sequence fences (docs/diagram-components-plan.md).
    * `pnpm diagrams:export --course <slug>` writes a static SVG of each one when exportSvg is on,
@@ -166,12 +177,21 @@ export const CourseManifestSchema = z.object({
     /** Complete ordered module path for this variant; absent shared keys are omitted. */
     moduleOrder: z.array(z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/)).min(1).optional(),
   })).optional(),
-  remove: z.object({ moduleKeys: z.array(z.string()).default([]), lessonKeys: z.array(z.string()).default([]) }).optional(),
+  remove: z.object({
+    moduleKeys: z.array(z.string()).default([]),
+    lessonKeys: z.array(z.string()).default([]),
+    /** Remove a lesson by its public address (the last part of its reader link). For a course without lesson keys. */
+    lessons: z.array(z.object({
+      slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+      /** The address that old links to the removed lesson open instead. */
+      redirectTo: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
+    }).strict()).min(1).optional(),
+  }).optional(),
 }).superRefine((manifest, ctx) => {
   if (manifest.legacySourceAudit && !manifest.repositoryTargetSlug) {
     ctx.addIssue({ code: "custom", path: ["legacySourceAudit"], message: "Legacy audit exception requires an existing repository target slug" });
   }
-  if (!manifest.modules.length && !manifest.remove?.moduleKeys.length && !manifest.remove?.lessonKeys.length &&
+  if (!manifest.modules.length && !manifest.remove?.moduleKeys.length && !manifest.remove?.lessonKeys.length && !manifest.remove?.lessons?.length &&
       !manifest.variants?.some(variant => variant.overrides.length || variant.modules.length || variant.omitLessonKeys.length || variant.moduleOrder)) {
     ctx.addIssue({ code: "custom", path: ["modules"], message: "Provide lessons, variant overrides, or explicit removals" });
   }
@@ -280,6 +300,13 @@ export const CourseManifestSchema = z.object({
   for (const field of ["moduleKeys", "lessonKeys"] as const) {
     const keys = manifest.remove?.[field] ?? [];
     if (new Set(keys).size !== keys.length) ctx.addIssue({ code: "custom", path: ["remove", field], message: "Removal keys must be unique" });
+  }
+  const removedSlugs = (manifest.remove?.lessons ?? []).map(lesson => lesson.slug);
+  if (new Set(removedSlugs).size !== removedSlugs.length) ctx.addIssue({ code: "custom", path: ["remove", "lessons"], message: "Removed lesson addresses must be unique" });
+  for (const lesson of manifest.remove?.lessons ?? []) {
+    if (lesson.redirectTo && removedSlugs.includes(lesson.redirectTo)) {
+      ctx.addIssue({ code: "custom", path: ["remove", "lessons"], message: `Lesson ${lesson.slug} cannot redirect to a removed lesson` });
+    }
   }
   for (const variant of manifest.variants ?? []) for (const override of variant.overrides) {
     if (manifest.remove?.lessonKeys.includes(override.lessonKey)) {

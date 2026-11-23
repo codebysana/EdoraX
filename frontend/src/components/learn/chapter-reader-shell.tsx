@@ -1,10 +1,12 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback, type CSSProperties } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
+import { useBrowserStorage, useHydrated } from "@/lib/use-browser-storage";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { ChapterSidebar, SidebarToggle } from "@/components/learn/chapter-sidebar";
+import { ChapterHighlights } from "@/components/learn/chapter-highlights";
 import { ChapterToc, TocToggle } from "@/components/learn/chapter-toc";
 import { ChapterNav } from "@/components/learn/chapter-nav";
 import { ReadingProgressBar, useReadingProgress } from "@/components/learn/chapter-progress-bar";
@@ -17,8 +19,10 @@ import { FocusModeToggle, ReaderFocusDock } from "@/components/learn/reader-focu
 import { cn } from "@/lib/utils";
 import { useReaderLayout } from "@/lib/use-reader-layout";
 import type { Heading } from "@/shared/lib/mdx-headings";
+import type { ReaderHighlight } from "@/shared/api/reader";
 import type { SyllabusModule } from "@/components/learn/course-syllabus";
 import { AskHelpDialog } from "@/components/help/ask-help-dialog";
+import { ReportIssueDialog } from "@/components/help/report-issue-dialog";
 import { StudyClock } from "@/components/learn/study-time-chip";
 import { useStudySession } from "@/lib/use-study-session";
 import { useMascot } from "@/lib/engagement/use-mascot";
@@ -27,11 +31,13 @@ import type { HelpThreadView } from "@/shared/api/help";
 import type { StreakMilestone } from "@/shared/lib/streak";
 import { HeadingNotesProvider } from "@/components/learn/heading-note";
 import { ChapterAudio } from "@/components/learn/chapter-audio";
+import { CourseRatingPrompt } from "@/components/learn/course-rating-modal";
 import { AskChapterPanel } from "@/components/learn/ask-chapter-panel";
 import { AskChapterProvider } from "@/components/learn/ask-chapter-context";
 import { AskAiFloating, AskAiHeaderButton } from "@/components/learn/ask-ai-floating";
 import type { ChapterNarration } from "@/lib/narration";
 import { PredictRevealProvider } from "@buildment/learning-ui/components/learn/predict-reveal";
+import { ChapterLinkProvider } from "@buildment/learning-ui/components/learn/chapter-link-context";
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
@@ -81,8 +87,10 @@ export function ChapterReaderShell({
   recap,
   streakMilestone = null,
   headingNotes = {},
+  highlights = [],
   predictGate = false,
   predictRevealed = true,
+  promptCourseRating = false,
   courseId,
   helpThread,
   narration = null,
@@ -113,8 +121,10 @@ export function ChapterReaderShell({
   recap?: { checks: string; open: string; next: string };
   streakMilestone?: StreakMilestone | null;
   headingNotes?: Record<string, string>;
+  highlights?: ReaderHighlight[];
   predictGate?: boolean;
   predictRevealed?: boolean;
+  promptCourseRating?: boolean;
   courseId: string;
   helpThread: HelpThreadView | null;
   /** Listen-along audio for this chapter, when its course has it. */
@@ -136,21 +146,29 @@ export function ChapterReaderShell({
     skipSkeleton,
   } = useReaderLayout(courseSlug);
   const scrollRef = useRef<HTMLElement>(null);
+  const articleRef = useRef<HTMLElement>(null);
   const router = useRouter();
+  const hydrated = useHydrated();
+  const [focusStored, setFocusStored] = useBrowserStorage("buildment:reader-focus", "0");
+  // "1": the reader chose focus mode. "quiz": a quiz chapter turned it on, so it ends with the quiz.
+  const focusMode = hydrated && (focusStored === "1" || focusStored === "quiz");
 
   const [showSkeleton, setShowSkeleton] = useState(!skipSkeleton);
-  const [focusMode, setFocusMode] = useState(false);
   const [mentorOpen, setMentorOpen] = useState(false);
   const openMentor = useCallback(() => setMentorOpen(true), []);
   const study = useStudySession(chapterId);
   const layoutBeforeFocus = useRef({ left: true, right: true });
+  const skipFocusRestore = useRef(false);
+  const wantsFullscreen = useRef(false);
 
   // After a long while on an unfinished chapter, the helper mascot offers a mentor.
   useMascot({ watchChapter: chapterComplete ? null : { chapterId, estimatedMinutes } });
   const quizAutoFocusSlug = useRef<string | null>(null);
 
   const exitFocusMode = useCallback(async () => {
-    setFocusMode(false);
+    skipFocusRestore.current = false;
+    wantsFullscreen.current = false;
+    setFocusStored("0");
     setLeftCollapsed(layoutBeforeFocus.current.left);
     setRightCollapsed(layoutBeforeFocus.current.right);
     if (document.fullscreenElement) {
@@ -160,11 +178,16 @@ export function ChapterReaderShell({
         /* user gesture may be required */
       }
     }
-  }, [setLeftCollapsed, setRightCollapsed]);
+  }, [setFocusStored, setLeftCollapsed, setRightCollapsed]);
 
-  const enterFocusMode = useCallback(async () => {
-    layoutBeforeFocus.current = { left: leftCollapsed, right: rightCollapsed };
-    setFocusMode(true);
+  const enterFocusMode = useCallback(async (source: "reader" | "quiz" = "reader") => {
+    skipFocusRestore.current = true;
+    const alreadyOn = focusStored === "1" || focusStored === "quiz";
+    if (!alreadyOn) {
+      layoutBeforeFocus.current = { left: leftCollapsed, right: rightCollapsed };
+    }
+    // A quiz never downgrades focus mode the reader chose.
+    if (!(source === "quiz" && focusStored === "1")) setFocusStored(source === "quiz" ? "quiz" : "1");
     setLeftCollapsed(true);
     setRightCollapsed(true);
     try {
@@ -174,7 +197,8 @@ export function ChapterReaderShell({
     } catch {
       /* fullscreen optional */
     }
-  }, [leftCollapsed, rightCollapsed, setLeftCollapsed, setRightCollapsed]);
+    wantsFullscreen.current = Boolean(document.fullscreenElement);
+  }, [focusStored, leftCollapsed, rightCollapsed, setFocusStored, setLeftCollapsed, setRightCollapsed]);
 
   const toggleFocusMode = useCallback(() => {
     if (focusMode) void exitFocusMode();
@@ -182,15 +206,25 @@ export function ChapterReaderShell({
   }, [focusMode, enterFocusMode, exitFocusMode]);
 
   useEffect(() => {
+    if (!hydrated || (focusStored !== "1" && focusStored !== "quiz")) {
+      skipFocusRestore.current = false;
+      return;
+    }
+    if (skipFocusRestore.current) return;
+    skipFocusRestore.current = true;
+    layoutBeforeFocus.current = { left: leftCollapsed, right: rightCollapsed };
+    setLeftCollapsed(true);
+    setRightCollapsed(true);
+  }, [hydrated, focusStored, leftCollapsed, rightCollapsed, setLeftCollapsed, setRightCollapsed]);
+
+  useEffect(() => {
     if (!focusMode) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") void exitFocusMode();
     };
     const onFullscreenChange = () => {
-      if (!document.fullscreenElement && focusMode) {
-        setFocusMode(false);
-        setLeftCollapsed(layoutBeforeFocus.current.left);
-        setRightCollapsed(layoutBeforeFocus.current.right);
+      if (!document.fullscreenElement && wantsFullscreen.current) {
+        void exitFocusMode();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -199,7 +233,7 @@ export function ChapterReaderShell({
       window.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("fullscreenchange", onFullscreenChange);
     };
-  }, [focusMode, exitFocusMode, setLeftCollapsed, setRightCollapsed]);
+  }, [focusMode, exitFocusMode]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo(0, 0);
@@ -227,8 +261,18 @@ export function ChapterReaderShell({
     if (readerMode !== "QUIZ") return;
     if (quizAutoFocusSlug.current === chapterSlug) return;
     quizAutoFocusSlug.current = chapterSlug;
-    void enterFocusMode();
+    void enterFocusMode("quiz");
   }, [chapterSlug, readerMode, enterFocusMode]);
+
+  // Focus mode that a quiz turned on must not follow the reader to a reading chapter,
+  // where it would hide the chapter list with no sign of why. The saved layout may be
+  // lost by then (a reload, a new chapter), so bring the chapter list back on desktop.
+  useEffect(() => {
+    if (!hydrated || readerMode === "QUIZ" || focusStored !== "quiz") return;
+    void exitFocusMode().then(() => {
+      if (!isMobile) setLeftCollapsed(false);
+    });
+  }, [hydrated, readerMode, focusStored, exitFocusMode, isMobile, setLeftCollapsed]);
 
   useEffect(() => {
     if (readerMode !== "QUIZ") return;
@@ -249,7 +293,7 @@ export function ChapterReaderShell({
     if (readerMode !== "QUIZ") return;
     const onQuizFocus = () => {
       if (!focusMode) {
-        void enterFocusMode();
+        void enterFocusMode("quiz");
         return;
       }
       if (!document.fullscreenElement) void document.documentElement.requestFullscreen?.().catch(() => undefined);
@@ -383,8 +427,6 @@ export function ChapterReaderShell({
                 "flex-1 overflow-y-auto",
                 focusMode ? "px-4 pt-10 pb-24 sm:px-8 lg:px-16" : "px-4 pt-8 pb-24 sm:px-6 lg:px-10"
               )}
-              // The Listen player cancels this top padding so it can sit flush with the top edge while pinned.
-              style={{ "--reader-pt": focusMode ? "2.5rem" : "2rem" } as CSSProperties}
             >
               {/* ~70 characters per line at 18px: long chapters stay comfortable to read. */}
               <div className="mx-auto max-w-[40rem]">
@@ -394,10 +436,10 @@ export function ChapterReaderShell({
                     {chapterTitle}
                   </h1>
                   {projectGoal && readerMode !== "QUIZ" ? (
-                    <p className="mt-4 border border-border bg-card px-4 py-3 text-base leading-6 text-muted-foreground">
-                      <span className="font-medium text-foreground">The project: </span>
-                      {projectGoal.trim().replace(/\.+$/, "")}.
-                    </p>
+                    <details className="mt-4 border border-border bg-card px-4 py-3 text-base leading-6 text-muted-foreground">
+                      <summary className="cursor-pointer font-medium text-foreground">Project overview</summary>
+                      <p className="mt-2">{projectGoal.trim().replace(/\.+$/, "")}.</p>
+                    </details>
                   ) : null}
                   {variant && readerMode !== "QUIZ" ? (
                     <p className="mt-2 bg-secondary px-4 py-3 text-base leading-6 text-muted-foreground">
@@ -431,36 +473,43 @@ export function ChapterReaderShell({
                   <ChapterAudio className="-mt-4 mb-8" src={narration.src} minutes={narration.minutes} bytes={narration.bytes} title={chapterTitle} />
                 ) : null}
 
-                <LearningLogProvider chapterId={chapterId} initialAnswers={learningLogAnswers}>
-                  <ChecklistProvider chapterId={chapterId} initialChecks={checklistState}>
-                    <article
-                      className={cn(
-                        "prose prose-neutral max-w-none",
-                        "prose-headings:scroll-mt-20 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-foreground prose-headings:text-balance",
-                        "prose-h2:mt-14 prose-h2:mb-5 prose-h2:border-b prose-h2:border-border prose-h2:pb-2.5 prose-h2:text-[1.5rem] prose-h2:leading-snug prose-h2:first:mt-0",
-                        "prose-h3:mt-10 prose-h3:mb-3 prose-h3:text-[1.25rem] prose-h3:leading-snug",
-                        "prose-p:my-5 prose-p:text-[1.0625rem] prose-p:leading-[1.8] sm:prose-p:text-[1.125rem] sm:prose-p:leading-[1.75]",
-                        "prose-li:my-1.5 prose-li:text-[1.0625rem] prose-li:leading-[1.75] sm:prose-li:text-[1.125rem]",
-                        "prose-a:font-medium prose-a:underline-offset-4 prose-a:decoration-foreground/30 hover:prose-a:decoration-foreground",
-                        "prose-strong:font-semibold prose-strong:text-foreground",
-                        "prose-code:rounded prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:font-normal prose-code:before:content-none prose-code:after:content-none",
-                        "prose-pre:max-w-none prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0",
-                        "prose-figure:my-6",
-                        "prose-blockquote:rounded-lg prose-blockquote:border-0 prose-blockquote:bg-secondary prose-blockquote:px-4 prose-blockquote:py-3 prose-blockquote:not-italic",
-                        "prose-hr:border-border",
-                        "prose-img:rounded-xl prose-img:border prose-img:border-border",
-                        "prose-figure:my-8 prose-figcaption:text-center prose-figcaption:text-sm prose-figcaption:text-muted-foreground",
-                        "prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-th:whitespace-nowrap prose-td:align-top prose-td:text-sm"
-                      )}
-                    >
-                      <HeadingNotesProvider chapterId={chapterId} notes={headingNotes}>
-                        <PredictRevealProvider gate={predictGate} revealed={predictRevealed}>
-                          {children}
-                        </PredictRevealProvider>
-                      </HeadingNotesProvider>
-                    </article>
-                  </ChecklistProvider>
-                </LearningLogProvider>
+                <ChapterLinkProvider courseSlug={courseSlug} modules={modules}>
+                  <LearningLogProvider chapterId={chapterId} initialAnswers={learningLogAnswers}>
+                    <ChecklistProvider chapterId={chapterId} initialChecks={checklistState}>
+                      <article
+                        ref={articleRef}
+                        className={cn(
+                          "prose prose-neutral max-w-none",
+                          "prose-headings:scroll-mt-20 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-foreground prose-headings:text-balance",
+                          "prose-h2:mt-14 prose-h2:mb-5 prose-h2:border-b prose-h2:border-border prose-h2:pb-2.5 prose-h2:text-[1.5rem] prose-h2:leading-snug prose-h2:first:mt-0",
+                          "prose-h3:mt-10 prose-h3:mb-3 prose-h3:text-[1.25rem] prose-h3:leading-snug",
+                          "prose-p:my-5 prose-p:text-[1.0625rem] prose-p:leading-[1.8] sm:prose-p:text-[1.125rem] sm:prose-p:leading-[1.75]",
+                          "prose-li:my-1.5 prose-li:text-[1.0625rem] prose-li:leading-[1.75] sm:prose-li:text-[1.125rem]",
+                          "prose-a:font-medium prose-a:underline-offset-4 prose-a:decoration-foreground/30 hover:prose-a:decoration-foreground",
+                          "prose-strong:font-semibold prose-strong:text-foreground",
+                          "prose-code:rounded prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:font-normal prose-code:before:content-none prose-code:after:content-none",
+                          "prose-pre:max-w-none prose-pre:p-0 prose-pre:bg-transparent prose-pre:border-0",
+                          "prose-figure:my-6",
+                          "prose-blockquote:rounded-lg prose-blockquote:border-0 prose-blockquote:bg-secondary prose-blockquote:px-4 prose-blockquote:py-3 prose-blockquote:not-italic",
+                          "prose-hr:border-border",
+                          "prose-img:rounded-xl prose-img:border prose-img:border-border",
+                          "prose-figure:my-8 prose-figcaption:text-center prose-figcaption:text-sm prose-figcaption:text-muted-foreground",
+                          "prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-th:whitespace-nowrap prose-td:align-top prose-td:text-sm"
+                        )}
+                      >
+                        <HeadingNotesProvider chapterId={chapterId} notes={headingNotes}>
+                          <PredictRevealProvider gate={predictGate} revealed={predictRevealed}>
+                            {children}
+                          </PredictRevealProvider>
+                        </HeadingNotesProvider>
+                      </article>
+                    </ChecklistProvider>
+                  </LearningLogProvider>
+                </ChapterLinkProvider>
+
+                {readerMode !== "QUIZ" ? (
+                  <ChapterHighlights chapterId={chapterId} initialHighlights={highlights} articleRef={articleRef} focusMode={focusMode} />
+                ) : null}
 
                 {readerMode !== "QUIZ" ? <AskChapterPanel /> : null}
 
@@ -485,24 +534,35 @@ export function ChapterReaderShell({
                   />
                 ) : null}
 
-                {prevHref || nextHref ? (
-                  <p className="mt-4 hidden text-center text-xs text-muted-foreground md:block">
-                    Tip: press{" "}
-                    {prevHref ? (
-                      <>
-                        <Kbd>[</Kbd> for the previous chapter
-                      </>
-                    ) : null}
-                    {prevHref && nextHref ? " and " : null}
-                    {nextHref ? (
-                      <>
-                        <Kbd>]</Kbd> for the next
-                        {prevHref ? null : " chapter"}
-                      </>
-                    ) : null}
-                    .
-                  </p>
-                ) : null}
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  {prevHref || nextHref ? (
+                    <p className="hidden text-xs text-muted-foreground md:block">
+                      Tip: press{" "}
+                      {prevHref ? (
+                        <>
+                          <Kbd>[</Kbd> for the previous chapter
+                        </>
+                      ) : null}
+                      {prevHref && nextHref ? " and " : null}
+                      {nextHref ? (
+                        <>
+                          <Kbd>]</Kbd> for the next
+                          {prevHref ? null : " chapter"}
+                        </>
+                      ) : null}
+                      .
+                    </p>
+                  ) : (
+                    <span />
+                  )}
+                  <div className="ml-auto">
+                    <ReportIssueDialog
+                      courseId={courseId}
+                      chapterId={chapterId}
+                      chapterTitle={chapterTitle}
+                    />
+                  </div>
+                </div>
               </div>
             </main>
 
@@ -517,6 +577,11 @@ export function ChapterReaderShell({
 
         {focusMode && <ReaderFocusDock onExitFocus={() => void exitFocusMode()} />}
         <AskAiFloating focusMode={focusMode} />
+        <CourseRatingPrompt
+          courseSlug={courseSlug}
+          courseTitle={courseTitle}
+          shouldPrompt={promptCourseRating}
+        />
       </ReaderShellFade>
     </div>
     </AskChapterProvider>

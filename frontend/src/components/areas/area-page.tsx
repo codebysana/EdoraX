@@ -5,7 +5,6 @@ import type { DotMood } from "@buildment/learning-ui/brand-dot";
 import { Dot } from "@/components/brand/dot";
 import { STATUS_LABEL, type AreaStatus } from "@/lib/learn-areas";
 import { cn } from "@/lib/utils";
-import { AreaTabs } from "./area-tabs";
 
 // Building blocks for the learner area overview pages (/learn, /labs, /practice,
 // /puzzles, /voice). Theme tokens only, so every page works in light and dark.
@@ -13,7 +12,6 @@ import { AreaTabs } from "./area-tabs";
 export function AreaPage({ children }: { children: ReactNode }) {
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-7 sm:px-6 sm:py-10 lg:px-8">
-      <AreaTabs />
       {children}
     </div>
   );
@@ -58,7 +56,7 @@ export function AreaHero({
   children?: ReactNode;
 }) {
   return (
-    <header className="mt-8 flex flex-col-reverse gap-6 sm:flex-row sm:items-center sm:justify-between">
+    <header className="flex flex-col-reverse gap-6 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 max-w-3xl">
         <div className="flex flex-wrap items-center gap-3">
           {eyebrow ? <span className="text-sm font-bold uppercase tracking-wider text-primary">{eyebrow}</span> : null}

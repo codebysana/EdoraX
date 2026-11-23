@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   BarChart3,
+  Headphones,
   BookOpenText,
   ChevronDown,
   ChevronsUpDown,
@@ -122,6 +123,12 @@ export function MentorWorkspaceSidebar({
       href: "/wallet",
       icon: Wallet,
       active: pathname.startsWith("/wallet"),
+    },
+    {
+      label: "Audiobooks",
+      href: "/workspace/audiobooks",
+      icon: Headphones,
+      active: pathname.startsWith("/workspace/audiobooks"),
     },
     {
       label: "Campaigns",

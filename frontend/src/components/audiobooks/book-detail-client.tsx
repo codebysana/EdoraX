@@ -75,14 +75,18 @@ export function TrackList({ book }: { book: Audiobook }) {
   return (
     <div className="space-y-8" data-testid="track-list">
       {book.parts.map((part) => (
-        <section key={part.number} aria-labelledby={`part-${part.number}`}>
-          <div className="flex items-baseline justify-between gap-4 border-b-2 border-foreground pb-2">
-            <h3 id={`part-${part.number}`} className="min-w-0 text-lg tracking-[-0.01em]">
-              <span className="text-muted-foreground">Part {part.number}</span>
-              {part.title ? <span> · {part.title}</span> : null}
-            </h3>
-            <span className="shrink-0 text-sm tabular-nums text-muted-foreground">{formatBookLength(part.minutes)}</span>
-          </div>
+        <section key={part.number} aria-labelledby={part.number > 0 ? `part-${part.number}` : undefined}>
+          {part.number > 0 ? (
+            <div className="flex items-baseline justify-between gap-4 border-b-2 border-foreground pb-2">
+              <h3 id={`part-${part.number}`} className="min-w-0 text-lg tracking-[-0.01em]">
+                <span className="text-muted-foreground">Part {part.number}</span>
+                {part.title ? <span> · {part.title}</span> : null}
+              </h3>
+              <span className="shrink-0 text-sm tabular-nums text-muted-foreground">{formatBookLength(part.minutes)}</span>
+            </div>
+          ) : (
+            <div className="border-b-2 border-foreground" />
+          )}
           <ol>
             {book.tracks.slice(part.firstTrack, part.firstTrack + part.trackCount).map((track, offset) => {
               const i = part.firstTrack + offset;

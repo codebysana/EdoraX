@@ -67,12 +67,7 @@ export async function loadStreakPopup(userId: string, options: { now?: Date } = 
   });
   const show =
     !(user?.gamificationHidden ?? false) &&
-    shouldShowStreakPopup({
-      seenOn,
-      today,
-      streakCount: activity.streakCount,
-      todayActive,
-    });
+    shouldShowStreakPopup({ seenOn, today });
 
   return {
     show,

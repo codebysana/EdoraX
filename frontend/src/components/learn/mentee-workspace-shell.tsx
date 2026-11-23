@@ -158,7 +158,7 @@ export function MenteeWorkspaceShell({
   };
   const youItems: LearnerNavItem[] = [
     { label: "Progress", href: "/progress", icon: TrendingUp, active: pathname === "/progress" },
-    { label: "Highlights", href: "/highlights", icon: Highlighter, active: pathname === "/highlights" },
+    { label: "Highlights and notes", href: "/highlights", icon: Highlighter, active: pathname === "/highlights" },
     { label: "Leaderboard", mobileLabel: "Ranks", href: "/leaderboard", icon: Trophy, active: pathname === "/leaderboard" },
     {
       label: helpUiCopy.learnerNav,

@@ -4,6 +4,7 @@ import {
   Dumbbell,
   FlaskConical,
   Headphones,
+  Highlighter,
   Home,
   Mic,
   PanelLeftClose,
@@ -15,7 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-export type Section = 'home' | 'courses' | 'mine' | 'progress' | 'leaderboard' | 'audiobooks' | 'labs' | 'shell-labs' | 'questions' | 'settings';
+export type Section = 'home' | 'courses' | 'mine' | 'progress' | 'leaderboard' | 'audiobooks' | 'labs' | 'shell-labs' | 'highlights' | 'questions' | 'settings';
 
 type NavItem = { id?: Section; label: string; icon: LucideIcon; soon?: boolean };
 
@@ -31,6 +32,7 @@ const LEARN: NavItem[] = [
 
 const YOU: NavItem[] = [
   { id: 'mine', label: 'My learning', icon: BookOpen },
+  { id: 'highlights', label: 'Highlights and notes', icon: Highlighter },
   { id: 'progress', label: 'Progress', icon: TrendingUp },
   { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
   { id: 'questions', label: 'Your questions', icon: CircleHelp },

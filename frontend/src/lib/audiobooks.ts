@@ -1,22 +1,18 @@
-// Pure helpers for the Audiobooks area: a course's narration manifest becomes a book with parts and
-// tracks, and the saved listening state becomes progress and a place to resume. No I/O here, so the
+// Pure helpers for the Audiobooks area: a published book from the API becomes the shape the shelf and
+// player use, and the saved listening state becomes progress and a place to resume. No I/O here, so the
 // server loader, the player and the tests share one definition.
 
 import { COURSE_CATEGORY_INFO } from "@/lib/course-categories";
 import type { CourseCategory } from "@/shared/domain/enums";
-
-export const AUDIOBOOK_AUTHOR = "Zeeshan Adil";
-
-const AUDIO_FILE = /^[\w.-]+\.mp3$/;
-const PART_AND_CHAPTER = /^(\d+)\.(\d+)/;
+import type { PublicAudiobook } from "@/shared/api/audiobooks";
 
 export type AudiobookTrack = {
-  /** The chapter slug, which is also the manifest key. */
+  /** The chapter's id. Listening progress is saved under it. */
   slug: string;
   title: string;
   minutes: number;
   src: string;
-  /** 1-based part (course module) and chapter number inside it, from the numbered audio file. */
+  /** 1-based part and chapter number inside it. Part 0 means the book has no parts: just numbered chapters. */
   part: number;
   chapter: number;
 };
@@ -34,80 +30,6 @@ export type Audiobook = {
   tracks: AudiobookTrack[];
   parts: AudiobookPart[];
 };
-
-/** Module titles by module order, and chapter titles by "module.chapter", from the public course detail. */
-export type CourseOutline = { modules: { order: number; title: string; chapters: { order: number; title: string }[] }[] };
-
-/** "1-2-roles-and-expectations" reads as "Roles and expectations". */
-export function chapterTitleFromSlug(slug: string): string {
-  const words = slug.replace(/^(?:\d+[.-])+/, "").replace(/-/g, " ").trim();
-  return words ? words.charAt(0).toUpperCase() + words.slice(1) : slug;
-}
-
-/**
- * The playable tracks of a manifest in course order (the audio files are numbered "01.02-...mp3"),
- * or an empty list. Entries without a safe file name or a positive length are skipped.
- */
-export function manifestTracks(manifest: unknown, base: string, courseSlug: string): AudiobookTrack[] {
-  if (!manifest || typeof manifest !== "object") return [];
-  const chapters = (manifest as { chapters?: unknown }).chapters;
-  if (!chapters || typeof chapters !== "object") return [];
-  const rows: (AudiobookTrack & { file: string })[] = [];
-  for (const [slug, entry] of Object.entries(chapters as Record<string, unknown>)) {
-    if (!entry || typeof entry !== "object") continue;
-    const { file, minutes } = entry as Record<string, unknown>;
-    if (typeof file !== "string" || !AUDIO_FILE.test(file)) continue;
-    if (typeof minutes !== "number" || !(minutes > 0)) continue;
-    const numbers = PART_AND_CHAPTER.exec(file);
-    rows.push({
-      slug,
-      title: chapterTitleFromSlug(slug),
-      minutes,
-      src: `${base}/${courseSlug}/${file}`,
-      part: numbers ? Number(numbers[1]) : 1,
-      chapter: numbers ? Number(numbers[2]) : rows.length + 1,
-      file,
-    });
-  }
-  rows.sort((a, b) => a.file.localeCompare(b.file, undefined, { numeric: true }));
-  return rows.map(({ file: _file, ...track }) => track);
-}
-
-/** Builds the book. The outline is optional: without it, titles come from the chapter slugs. */
-export function buildAudiobook(
-  course: { slug: string; title: string; description: string | null; category: CourseCategory; subcategory: string | null },
-  tracks: AudiobookTrack[],
-  outline: CourseOutline | null = null,
-): Audiobook | null {
-  if (tracks.length === 0) return null;
-  const moduleByOrder = new Map(outline?.modules.map((m) => [m.order, m]) ?? []);
-  const titled = tracks.map((track) => {
-    const chapter = moduleByOrder.get(track.part)?.chapters.find((c) => c.order === track.chapter);
-    return chapter?.title.trim() ? { ...track, title: chapter.title.trim() } : track;
-  });
-  const parts: AudiobookPart[] = [];
-  titled.forEach((track, index) => {
-    const last = parts[parts.length - 1];
-    if (last && last.number === track.part) {
-      last.trackCount += 1;
-      last.minutes += track.minutes;
-      return;
-    }
-    parts.push({ number: track.part, title: moduleByOrder.get(track.part)?.title.trim() || null, firstTrack: index, trackCount: 1, minutes: track.minutes });
-  });
-  return {
-    slug: course.slug,
-    title: course.title,
-    // Every Edorax course is published in Zeeshan Adil's name; the catalog's instructor field can name the team.
-    author: AUDIOBOOK_AUTHOR,
-    category: course.category,
-    subcategory: course.subcategory,
-    description: course.description,
-    totalMinutes: titled.reduce((sum, track) => sum + track.minutes, 0),
-    tracks: titled,
-    parts,
-  };
-}
 
 export function categoryLabel(category: CourseCategory): string {
   return COURSE_CATEGORY_INFO.find((info) => info.value === category)?.label ?? "Course";
@@ -177,7 +99,26 @@ export function resumeTarget(book: Pick<Audiobook, "tracks">, state: BookState |
 
 /** "Part 2, chapter 3" for a track. */
 export function trackLabel(track: Pick<AudiobookTrack, "part" | "chapter">): string {
-  return `Part ${track.part}, chapter ${track.chapter}`;
+  return track.part > 0 ? `Part ${track.part}, chapter ${track.chapter}` : `Chapter ${track.chapter}`;
+}
+
+/** A published book from the API as the player and shelf use it: one run of chapters, no parts. */
+export function audiobookFromApi(book: PublicAudiobook): Audiobook {
+  const tracks: AudiobookTrack[] = [...book.tracks]
+    .sort((a, b) => a.position - b.position)
+    .map((track) => ({ slug: track.id, title: track.title, minutes: track.durationSeconds / 60, src: track.src, part: 0, chapter: track.position }));
+  const totalMinutes = tracks.reduce((sum, track) => sum + track.minutes, 0);
+  return {
+    slug: book.slug,
+    title: book.title,
+    author: book.authorName,
+    category: book.category,
+    subcategory: null,
+    description: book.description,
+    totalMinutes,
+    tracks,
+    parts: [{ number: 0, title: null, firstTrack: 0, trackCount: tracks.length, minutes: totalMinutes }],
+  };
 }
 
 // ---- Formatting --------------------------------------------------------------------

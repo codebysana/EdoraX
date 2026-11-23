@@ -123,7 +123,7 @@ export function NowPlaying() {
                     )}
                   >
                     <span className="w-10 shrink-0 text-sm tabular-nums text-muted-foreground">
-                      {item.part}.{item.chapter}
+                      {item.part > 0 ? `${item.part}.${item.chapter}` : item.chapter}
                     </span>
                     <span className={cn("min-w-0 flex-1 truncate text-[15px]", current && "font-bold")}>{item.title}</span>
                     {saved?.done ? <Check aria-label="Finished" className="size-4 shrink-0 text-emerald-600" /> : null}

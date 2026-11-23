@@ -10,19 +10,15 @@ describe("shouldShowStreakPopup (once per local day)", () => {
   const today = "2026-11-03";
 
   it("does not show again after dismiss in the same window", () => {
-    expect(shouldShowStreakPopup({ seenOn: today, today, streakCount: 5, todayActive: true })).toBe(false);
+    expect(shouldShowStreakPopup({ seenOn: today, today })).toBe(false);
   });
 
   it("shows on the next local day after a dismiss", () => {
-    expect(
-      shouldShowStreakPopup({ seenOn: "2026-11-02", today, streakCount: 5, todayActive: false })
-    ).toBe(true);
+    expect(shouldShowStreakPopup({ seenOn: "2026-11-02", today })).toBe(true);
   });
 
-  it("requires a streak or today's activity", () => {
-    expect(shouldShowStreakPopup({ seenOn: null, today, streakCount: 0, todayActive: false })).toBe(false);
-    expect(shouldShowStreakPopup({ seenOn: null, today, streakCount: 0, todayActive: true })).toBe(true);
-    expect(shouldShowStreakPopup({ seenOn: null, today, streakCount: 1, todayActive: false })).toBe(true);
+  it("shows on the first open for everyone, including a learner with no streak", () => {
+    expect(shouldShowStreakPopup({ seenOn: null, today })).toBe(true);
   });
 });
 

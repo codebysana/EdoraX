@@ -38,10 +38,15 @@ export async function generateMetadata({ params }: { params: Promise<{ courseSlu
 
 export default async function ChapterReaderPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ courseSlug: string; chapterSlug: string }>;
+  searchParams: Promise<{ highlight?: string | string[] }>;
 }) {
   const { courseSlug, chapterSlug } = await params;
+  // A link from the notebook carries the highlight to scroll to.
+  const { highlight } = await searchParams;
+  const focusHighlightId = typeof highlight === "string" && highlight.length <= 64 ? highlight : null;
   const user = await requireVerifiedUser();
 
   let view: ChapterReaderView;
@@ -57,7 +62,9 @@ export default async function ChapterReaderPage({
 
   const { course, chapter, prev, next, modules } = view;
   // Older links carry the chapter's id after its slug; show the address the course itself uses.
-  if (decodeURIComponent(chapterSlug) !== chapter.slug) redirect(`/courses/${course.slug}/${chapter.slug}`);
+  if (decodeURIComponent(chapterSlug) !== chapter.slug) {
+    redirect(`/courses/${course.slug}/${chapter.slug}${focusHighlightId ? `?highlight=${encodeURIComponent(focusHighlightId)}` : ""}`);
+  }
   const variant = variantForTrack(view.track);
 
   if (view.locked || !view.content) {
@@ -124,9 +131,12 @@ export default async function ChapterReaderPage({
         streakMilestone={content.streakMilestone}
         headingNotes={content.headingNotes}
         highlights={content.highlights}
+        focusHighlightId={focusHighlightId}
         predictGate={content.predictGate}
         predictRevealed={content.predictRevealed}
         promptCourseRating={Boolean(content.promptCourseRating)}
+        canRateCourse={Boolean(content.canRateCourse)}
+        myCourseRating={content.myCourseRating ?? null}
         helpThread={content.helpThread}
         narration={narration}
         user={user}

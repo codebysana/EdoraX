@@ -12,7 +12,7 @@ import { Dot } from "@/components/brand/dot";
 
 export const metadata: Metadata = {
   title: "Audiobooks",
-  description: "Every narrated Edorax course as an audiobook: chapters as tracks, a player that follows you around the site, and your place kept in every book.",
+  description: "Audiobooks on Edorax: chapters as tracks, a player that follows you around the site, and your place kept in every book.",
   alternates: { canonical: "/audiobooks" },
   openGraph: { title: "Audiobooks on Edorax", url: "/audiobooks", images: [SITE_SHARE_IMAGE] },
 };
@@ -53,7 +53,7 @@ export default async function AudiobooksPage() {
         title={area.name}
         status={area.status}
         mood="happy"
-        intro="Every course with narration, as a book you can listen to from start to finish. Chapters play one after another, the player stays with you as you move around Edorax, and your place in each book is kept on this device."
+        intro="Books you can listen to from start to finish. Chapters play one after another, the player stays with you as you move around Edorax, and your place in each book is kept on this device."
       >
         {books.length > 0 ? (
           <dl className="flex flex-wrap gap-x-8 gap-y-3" data-testid="audiobook-totals">
@@ -89,8 +89,8 @@ export default async function AudiobooksPage() {
           <h2 className="mt-4 text-xl tracking-[-0.02em]">{catalogReachable ? "No audiobooks yet" : "Books could not be loaded"}</h2>
           <p className="mt-2 max-w-sm text-base text-muted-foreground">
             {catalogReachable
-              ? "A course shows up here as soon as its chapters are read aloud."
-              : "The course list is not reachable right now. Try again in a moment."}
+              ? "Audiobooks will appear here as soon as they are published."
+              : "The audiobooks are not reachable right now. Try again in a moment."}
           </p>
         </div>
       )}

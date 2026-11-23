@@ -317,6 +317,7 @@ model User {
   discountCampaignsCreated CourseDiscountCampaign[]
   instructorCouponRedemptions InstructorCouponRedemption[]
   courseMemberships CourseInstructor[]
+  audiobooks    Audiobook[]
   courseInstructorInvitesSent CourseInstructorInvite[] @relation("CourseInstructorInviteSender")
   enrollments   Enrollment[]
   courseRatings CourseRating[]
@@ -1848,4 +1849,48 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 
   @@map("app_settings")
+}
+
+enum AudiobookStatus {
+  DRAFT
+  PUBLISHED
+}
+
+/// A standalone audiobook an instructor uploads. Not tied to a course: nothing about a course's
+/// narration or content is exposed here. Learners see it only while it is PUBLISHED.
+model Audiobook {
+  id          String          @id @default(cuid())
+  slug        String          @unique
+  title       String
+  description String?
+  /// Name shown as the author on the shelf. Defaults to the uploader's name.
+  authorName  String
+  category    CourseCategory  @default(TECH)
+  status      AudiobookStatus @default(DRAFT)
+  publishedAt DateTime?
+  ownerId     String
+  owner       User            @relation(fields: [ownerId], references: [id])
+  tracks      AudiobookTrack[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([ownerId])
+  @@index([status, publishedAt])
+}
+
+/// One audio file of an audiobook (a chapter). The file lives in the private R2 bucket under
+/// `audiobooks/<audiobookId>/<id>.mp3` and is only served through the API.
+model AudiobookTrack {
+  id            String    @id @default(cuid())
+  audiobookId   String
+  audiobook     Audiobook @relation(fields: [audiobookId], references: [id], onDelete: Cascade)
+  title         String
+  /// 1-based order inside the book.
+  position      Int
+  durationSeconds Int
+  bytes         Int
+  createdAt     DateTime  @default(now())
+
+  @@unique([audiobookId, position])
+  @@index([audiobookId])
 }
